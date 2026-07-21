@@ -118,6 +118,8 @@
   .chip b { color: var(--amber-ink); font-weight: 700; }
   .chip.zero b { color: var(--good-ink); }
   .chip.total { background: var(--amber-wash); border-color: transparent; color: var(--amber-ink); }
+  .fill.heard { border-bottom: 2px dotted var(--amber); }
+  .transcript .pmark { color: var(--good-ink); background: var(--good-wash); padding: 1px 6px; border-radius: 6px; font-weight: 600; font-size: 11px; }
   .warn { margin-top: 14px; background: var(--amber-wash); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); border-radius: var(--radius-sm); padding: 12px 15px; font-size: 13px; color: var(--amber-ink); display: none; }
   .warn.on { display: block; }
 
@@ -359,6 +361,9 @@
             <div class="r-metric"><div class="k">Fillers</div><div class="v" id="mFill">0</div><div class="u" id="mFpm"></div></div>
             <div class="r-metric"><div class="k">Pace</div><div class="v" id="mWpm">0</div><div class="u">words / min</div></div>
             <div class="r-metric"><div class="k">Talk time</div><div class="v" id="mTime">0:00</div><div class="u" id="mWords"></div></div>
+            <div class="r-metric"><div class="k">Confident pauses</div><div class="v" id="mPause" style="color:var(--good-ink)">0</div><div class="u">the goal — pauses beat fillers</div></div>
+            <div class="r-metric"><div class="k">Longest clean run</div><div class="v" id="mClean">—</div><div class="u">no fillers</div></div>
+            <div class="r-metric"><div class="k">Stalls</div><div class="v" id="mStall">0</div><div class="u">4s+ of silence</div></div>
           </div>
           <div class="recap-actions">
             <button class="btn-accent" id="againBtn">Practice again</button>
@@ -462,6 +467,10 @@
             <option value="es-ES">Español</option>
             <option value="fr-FR">Français</option>
           </select>
+        </div>
+        <div class="set-row">
+          <div class="lbl"><div class="t1">Vocal filler detection <span class="pro-pill" style="color:var(--amber-ink);background:var(--amber-wash)">Beta</span></div><div class="t2">Listens for "um"/"uh" sounds the transcriber misses</div></div>
+          <span class="toggle" id="setAcoustic"><span class="switch" aria-hidden="true"></span><span id="setAcousticLabel">On</span></span>
         </div>
       </div>
       <div class="card set-card">
@@ -574,7 +583,7 @@
   var DEFAULT_ON = ["um", "uh", "like", "so", "you know"];
   function loadJSON(k, fallback) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null || v === undefined ? fallback : v; } catch (e) { return fallback; } }
   function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
-  var S = loadJSON("noums.settings", { fillers: DEFAULT_ON.slice(), lang: "en-US", camDefault: false, sessLen: 5, mode: "interview" });
+  var S = loadJSON("noums.settings", { fillers: DEFAULT_ON.slice(), lang: "en-US", camDefault: false, sessLen: 5, mode: "interview", acoustic: true });
   var SESSIONS = loadJSON("noums.sessions", []);
   function persist() { saveJSON("noums.settings", S); }
   function persistSessions() { saveJSON("noums.sessions", SESSIONS); }
@@ -647,6 +656,9 @@
   var recognizing = false, recog = null, audioCtx = null, analyser = null, micStream = null;
   var finalText = "", interimText = "", markedFinalHtml = "", counts = {}, totalFillers = 0;
   var startTime = 0, timerIv = null;
+  var fillerTimes = [], pauses = 0, stalls = 0;
+  var acousticQueue = [], lastTranscriptVocal = 0, vRun = null, silStart = 0, hadSpeech = false, frameN = 0;
+  var VOCAL = ["um", "uh", "er", "ah"];
   var warn = $("supportWarn");
   if (!SR) {
     warn.classList.add("on");
@@ -660,7 +672,15 @@
     activeFillers().forEach(function (f) {
       var re = new RegExp("\\b(" + f.replace(/ /g, "\\s+") + ")\\b", "gi");
       out = out.replace(re, function (m) {
-        if (countThem) { counts[f] = (counts[f] || 0) + 1; totalFillers++; }
+        if (countThem) {
+          var now = Date.now(), deduped = false;
+          if (VOCAL.indexOf(f) > -1) {
+            lastTranscriptVocal = now;
+            while (acousticQueue.length && now - acousticQueue[0] > 4000) acousticQueue.shift();
+            if (acousticQueue.length) { acousticQueue.shift(); deduped = true; }
+          }
+          if (!deduped) { counts[f] = (counts[f] || 0) + 1; totalFillers++; fillerTimes.push(now); }
+        }
         return '<span class="fill">' + m + "</span>";
       });
     });
@@ -680,24 +700,96 @@
     var html = '<span class="chip total">total <b style="color:inherit">' + totalFillers + "</b></span>";
     if (!keys.length) { html += '<span class="chip zero">clean so far <b>✓</b></span>'; }
     else keys.slice(0, 4).forEach(function (k) { html += '<span class="chip">' + k + " <b>" + counts[k] + "</b></span>"; });
+    html += '<span class="chip zero">pauses <b>' + pauses + "</b></span>";
     $("tally").innerHTML = html;
   }
   renderTally();
 
-  /* waveform */
-  var levels = [];
+  /* ---- audio analysis: vocal fillers + pauses ---- */
+  var SIL_T = 0.008, SPEECH_T = 0.016;
+
+  function detectPitch(buf, sr) {
+    var n = buf.length;
+    var minLag = Math.floor(sr / 350), maxLag = Math.min(Math.floor(sr / 70), n - 4);
+    var best = 0, bestLag = 0;
+    for (var lag = minLag; lag <= maxLag; lag += 2) {
+      var s = 0, e1 = 0, e2 = 0;
+      for (var i = 0; i + lag < n; i += 2) {
+        var a = buf[i], b = buf[i + lag];
+        s += a * b; e1 += a * a; e2 += b * b;
+      }
+      var denom = Math.sqrt(e1 * e2);
+      if (!denom) continue;
+      var v = s / denom;
+      if (v > best) { best = v; bestLag = lag; }
+    }
+    return (best > 0.6 && bestLag) ? sr / bestLag : 0;
+  }
+
+  function evalRun(r, tEnd) {
+    var dur = (tEnd - r.start) / 1000;
+    if (dur < 0.24 || dur > 1.6 || r.pitches.length < 4) return;
+    var mean = 0;
+    r.pitches.forEach(function (p) { mean += p; });
+    mean /= r.pitches.length;
+    var maxDev = 0;
+    r.pitches.forEach(function (p) { var d = Math.abs(p - mean); if (d > maxDev) maxDev = d; });
+    if (maxDev / mean > 0.12) return;
+    var now = Date.now();
+    if (now - lastTranscriptVocal < 1500) return;
+    if (S.fillers.indexOf("um") === -1 && S.fillers.indexOf("uh") === -1) return;
+    acousticQueue.push(now);
+    counts["um"] = (counts["um"] || 0) + 1;
+    totalFillers++;
+    fillerTimes.push(now);
+    markedFinalHtml += '<span class="fill heard" title="heard in the audio">um</span> ';
+    renderTranscript();
+  }
+
+  function analyzeFrame(buf, rms, sr, t) {
+    var speaking = rms >= SPEECH_T;
+    if (speaking) {
+      if (hadSpeech && silStart) {
+        var gap = (t - silStart) / 1000;
+        if (gap >= 0.6 && gap <= 2.5) {
+          pauses++;
+          markedFinalHtml += '<span class="pmark">◦ pause</span> ';
+          renderTranscript();
+        } else if (gap >= 4) { stalls++; }
+      }
+      silStart = 0;
+      hadSpeech = true;
+    } else if (rms < SIL_T && !silStart) {
+      silStart = t;
+    }
+    if (S.acoustic === false || !speaking) {
+      if (!speaking && vRun) { evalRun(vRun, t); vRun = null; }
+      return;
+    }
+    var pitch = detectPitch(buf, sr);
+    if (pitch > 0) {
+      if (!vRun) vRun = { start: t, pitches: [] };
+      vRun.pitches.push(pitch);
+    } else if (vRun) { evalRun(vRun, t); vRun = null; }
+  }
+
+  /* waveform + analysis loop */
+  var levels = [], fbuf = null;
   function drawWave() {
     var canvas = $("wave"), ctx = canvas.getContext("2d");
     var W = canvas.width, H = canvas.height;
-    var data = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
     function frame() {
       if (!recognizing) { ctx.clearRect(0, 0, W, H); return; }
       var lvl = 0.04;
-      if (analyser && data) {
-        analyser.getByteTimeDomainData(data);
+      if (analyser) {
+        if (!fbuf || fbuf.length !== analyser.fftSize) fbuf = new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(fbuf);
         var sum = 0;
-        for (var i = 0; i < data.length; i++) { var d = (data[i] - 128) / 128; sum += d * d; }
-        lvl = Math.min(1, Math.sqrt(sum / data.length) * 4);
+        for (var i = 0; i < fbuf.length; i++) { sum += fbuf[i] * fbuf[i]; }
+        var rms = Math.sqrt(sum / fbuf.length);
+        lvl = Math.min(1, rms * 4);
+        frameN++;
+        if (frameN % 2 === 0) analyzeFrame(fbuf, rms, audioCtx ? audioCtx.sampleRate : 48000, Date.now());
       }
       levels.push(lvl);
       var bars = 80;
@@ -723,6 +815,8 @@
   function startEngine() {
     if (!SR) { warn.classList.add("on"); return; }
     finalText = ""; interimText = ""; markedFinalHtml = ""; counts = {}; totalFillers = 0; levels = [];
+    fillerTimes = []; pauses = 0; stalls = 0; acousticQueue = []; lastTranscriptVocal = 0;
+    vRun = null; silStart = 0; hadSpeech = false; frameN = 0;
     renderTranscript();
     recognizing = true;
     startTime = Date.now();
@@ -743,7 +837,7 @@
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       var src = audioCtx.createMediaStreamSource(stream);
       analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
+      analyser.fftSize = 2048;
       src.connect(analyser);
       drawWave();
     }).catch(function () { drawWave(); });
@@ -805,11 +899,15 @@
     var mins = elapsed / 60;
     var fpm = totalFillers / mins;
     var wpm = Math.round(words / mins);
-    var score = Math.max(30, Math.min(99, Math.round(100 - fpm * 7 - (words < 20 ? 15 : 0))));
+    var bounds = [startTime].concat(fillerTimes, [Date.now()]);
+    var longest = 0;
+    for (var bi = 1; bi < bounds.length; bi++) longest = Math.max(longest, bounds[bi] - bounds[bi - 1]);
+    var cleanSec = Math.min(Math.round(longest / 1000), Math.round(elapsed));
+    var score = Math.max(30, Math.min(99, Math.round(100 - fpm * 7 - stalls * 2 + Math.min(8, pauses) - (words < 20 ? 15 : 0))));
 
     var prev = SESSIONS.length ? SESSIONS[SESSIONS.length - 1] : null;
     if (words > 0) {
-      SESSIONS.push({ t: Date.now(), mode: S.mode, dur: Math.round(elapsed), words: words, fillers: totalFillers, counts: counts, score: score, fpm: Math.round(fpm * 10) / 10 });
+      SESSIONS.push({ t: Date.now(), mode: S.mode, dur: Math.round(elapsed), words: words, fillers: totalFillers, counts: counts, score: score, fpm: Math.round(fpm * 10) / 10, pauses: pauses, stalls: stalls, clean: cleanSec });
       if (SESSIONS.length > 200) SESSIONS = SESSIONS.slice(-200);
       persistSessions();
       updateSideStreak();
@@ -827,8 +925,12 @@
     else if (fpm < 1.5) { verdict = "Clear and steady."; sub = "Barely any fillers. That's what confident pauses sound like."; }
     else if (fpm < 4) { verdict = "Solid — a few crutches."; sub = "You're close. Swap the highlighted words for a breath."; }
     else { verdict = "Good raw material."; sub = "Lots of fillers means lots of easy wins. Same answer, more pauses."; }
+    if (words && pauses > 0) sub += " You held " + pauses + " confident pause" + (pauses === 1 ? "" : "s") + " instead of filling.";
     $("verdict").textContent = verdict;
     $("verdictSub").textContent = sub;
+    $("mPause").textContent = pauses;
+    $("mClean").textContent = words ? (cleanSec >= 60 ? fmtDur(cleanSec) : cleanSec + "s") : "—";
+    $("mStall").textContent = stalls;
 
     var db = $("deltaBadge");
     if (prev && words > 0 && prev.score) {
@@ -1053,12 +1155,19 @@
     $("fillChips").innerHTML = ALL_FILLERS.map(chipHtml).join("");
     bindChips($("fillChips"));
     $("langSel").value = S.lang;
+    $("setAcoustic").classList.toggle("on", S.acoustic !== false);
+    $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
     $("setCamDefault").classList.toggle("on", !!S.camDefault);
     $("setCamLabel").textContent = S.camDefault ? "On by default" : "Off by default";
     document.querySelectorAll("#lenSeg button").forEach(function (b) { b.classList.toggle("on", parseInt(b.dataset.len, 10) === S.sessLen); });
     $("dataCount").textContent = SESSIONS.length + " session" + (SESSIONS.length === 1 ? "" : "s") + " stored in this browser";
   }
   $("langSel").addEventListener("change", function () { S.lang = $("langSel").value; persist(); });
+  $("setAcoustic").addEventListener("click", function () {
+    S.acoustic = !(S.acoustic !== false); persist();
+    $("setAcoustic").classList.toggle("on", S.acoustic !== false);
+    $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
+  });
   $("setCamDefault").addEventListener("click", function () {
     S.camDefault = !S.camDefault; persist();
     $("setCamDefault").classList.toggle("on", S.camDefault);

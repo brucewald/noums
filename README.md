@@ -64,7 +64,7 @@ would require a purchase approach. Available as of 2026-07-21:
 ## Roadmap
 
 - [ ] Deploy (any static host: Cloudflare Pages, Netlify, GitHub Pages)
-- [ ] Audio-level filler detection to reliably catch "um"/"uh"
+- [x] Audio-level filler detection (pitch-stability analysis) + confident-pause and stall tracking
 - [ ] Presentation mode (rehearse against your own talking points)
 - [ ] Pressure mode (Pro) — see `design/mockup.html`
 - [ ] Accounts + sync (first real backend feature, gates the Pro tier)
