@@ -81,3 +81,24 @@ The button is wired but dormant until an OAuth client ID is set:
    `https://brucewald.github.io` (add your custom domain later too).
 4. Copy the client ID (ends in `.apps.googleusercontent.com`) and paste it
    into `GOOGLE_CLIENT_ID` in `app/index.html`. Push — done.
+
+## Backend (Supabase)
+
+The app is local-first and works with no backend. When `SUPABASE_URL` and
+`SUPABASE_ANON_KEY` are set in `app/index.html`, it upgrades itself:
+
+- Sign-in becomes real: email magic links (verified) and Google OAuth,
+  both through Supabase Auth.
+- Sessions sync: local history uploads on first sign-in, server history
+  merges down, new sessions push as they finish. Cross-device works.
+- Row Level Security (see `supabase/schema.sql`) ensures each user can
+  only ever read/write their own rows.
+
+Setup: create a project at supabase.com, run `supabase/schema.sql` in the
+SQL Editor, set the Site URL (Authentication → URL Configuration) to the
+app's URL, enable the Google provider (paste the Google OAuth client ID +
+secret, and add Supabase's callback URL to the Google client's authorized
+redirect URIs), then paste the project URL + anon key into `app/index.html`.
+
+Note: the free tier's built-in email service is rate-limited (a few magic
+links per hour) — fine for testing; configure custom SMTP before real users.

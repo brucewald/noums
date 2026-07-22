@@ -537,6 +537,7 @@
     <input class="inp" id="authEmail" type="email" placeholder="you@example.com" autocomplete="email">
     <div class="auth-err" id="authErr">That doesn't look like an email — try again.</div>
     <button class="btn-accent btn-block" id="authGo">Create free account</button>
+    <div class="auth-err" id="authMsg" style="color:var(--good-ink)"></div>
     <div class="div-or">or</div>
     <button class="btn-google" id="authGoogle">
       <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.4 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.4-5.5l-7.5-5.8c-2.1 1.4-4.8 2.3-7.9 2.3-6.3 0-11.7-3.9-13.6-9.3l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
@@ -949,6 +950,7 @@
       if (SESSIONS.length > 200) SESSIONS = SESSIONS.slice(-200);
       persistSessions();
       updateSideStreak();
+      if (sb && signedInHandled) sb.from("sessions").insert([rowFromLocal(SESSIONS[SESSIONS.length - 1])]).then(function () {});
     }
 
     $("recapSub").textContent = BANKS[S.mode].label + " · " + fmtDur(Math.round(elapsed));
@@ -1225,6 +1227,7 @@
   $("clearData").addEventListener("click", function () {
     if ($("clearData").textContent === "Clear history") { $("clearData").textContent = "Tap again to confirm"; return; }
     SESSIONS = []; persistSessions(); updateSideStreak();
+    if (sb && signedInHandled) sb.from("sessions").delete().gte("t", "1970-01-01").then(function () {});
     $("clearData").textContent = "Clear history";
     renderSettings();
   });
@@ -1300,6 +1303,21 @@
     var em = $("authEmail").value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { $("authErr").style.display = "block"; return; }
     $("authErr").style.display = "none";
+    if (sb) {
+      $("authGo").textContent = "Sending…";
+      sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: location.origin + location.pathname } }).then(function (res) {
+        if (res.error) {
+          $("authErr").textContent = res.error.message;
+          $("authErr").style.display = "block";
+          $("authGo").textContent = "Email me a sign-in link";
+          return;
+        }
+        $("authGo").textContent = "Link sent ✓";
+        $("authMsg").textContent = "Check your inbox — click the link to sign in.";
+        $("authMsg").style.display = "block";
+      });
+      return;
+    }
     ACCOUNT = { email: em, plan: chosenPlan, created: Date.now(), via: "email" };
     saveJSON("noums.account", ACCOUNT);
     $("authOverlay").classList.remove("open");
@@ -1329,6 +1347,10 @@
     tc.requestAccessToken();
   }
   $("authGoogle").addEventListener("click", function () {
+    if (sb) {
+      sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+      return;
+    }
     if (!GOOGLE_CLIENT_ID) { $("gNote").style.display = "block"; return; }
     if (gisReady && window.google && google.accounts && google.accounts.oauth2) { googleSignIn(); return; }
     var sc = document.createElement("script");
@@ -1338,18 +1360,91 @@
     document.head.appendChild(sc);
   });
   $("signOut").addEventListener("click", function () {
+    if (sb) {
+      sb.auth.signOut().then(function () {
+        try { localStorage.removeItem("noums.account"); } catch (e) {}
+        location.reload();
+      });
+      return;
+    }
     try { localStorage.removeItem("noums.account"); } catch (e) {}
     location.reload();
   });
+
+  /* ---------- backend (Supabase) ---------- */
+  var SUPABASE_URL = "";      /* e.g. https://abcdefgh.supabase.co */
+  var SUPABASE_ANON_KEY = ""; /* the anon public key from Project Settings -> API */
+  var sb = null, signedInHandled = false;
+
+  function rowFromLocal(s) {
+    return { t: new Date(s.t).toISOString(), mode: s.mode, dur: s.dur, words: s.words, fillers: s.fillers, counts: s.counts || {}, score: s.score, fpm: s.fpm, pauses: s.pauses || 0, stalls: s.stalls || 0, clean: s.clean || 0 };
+  }
+  function syncSessions() {
+    if (!sb) return;
+    sb.from("sessions").select("t,mode,dur,words,fillers,counts,score,fpm,pauses,stalls,clean").order("t", { ascending: true }).then(function (res) {
+      if (res.error || !res.data) return;
+      var server = res.data, serverTs = {}, localTs = {};
+      server.forEach(function (r) { serverTs[+new Date(r.t)] = true; });
+      SESSIONS.forEach(function (s) { localTs[s.t] = true; });
+      var missing = SESSIONS.filter(function (s) { return !serverTs[s.t]; });
+      if (missing.length) sb.from("sessions").insert(missing.map(rowFromLocal)).then(function () {});
+      var added = false;
+      server.forEach(function (r) {
+        var t = +new Date(r.t);
+        if (!localTs[t]) {
+          SESSIONS.push({ t: t, mode: r.mode, dur: r.dur, words: r.words, fillers: r.fillers, counts: r.counts || {}, score: r.score, fpm: Number(r.fpm), pauses: r.pauses || 0, stalls: r.stalls || 0, clean: r.clean || 0 });
+          added = true;
+        }
+      });
+      if (added) {
+        SESSIONS.sort(function (a, b) { return a.t - b.t; });
+        if ($("view-progress").classList.contains("on")) renderProgress();
+      }
+      persistSessions();
+      updateSideStreak();
+    });
+  }
+  function onSignedIn(user) {
+    if (signedInHandled) return;
+    signedInHandled = true;
+    var prevPlan = (loadJSON("noums.account", null) || {}).plan;
+    ACCOUNT = { email: user.email, name: (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) || "", plan: prevPlan || chosenPlan, created: Date.now(), via: "supabase", uid: user.id };
+    saveJSON("noums.account", ACCOUNT);
+    $("authOverlay").classList.remove("open");
+    syncSessions();
+    afterAuth();
+  }
+  function showAuth() {
+    if (chosenPlan === "pro") { $("planFlag").style.display = "inline-block"; }
+    if (sb) {
+      $("authGo").textContent = "Email me a sign-in link";
+      document.querySelector("#authOverlay .lede").textContent = "Free for daily practice. Sign in and your progress syncs to every device.";
+      document.querySelector("#authOverlay .auth-note").textContent = "No password — we email you a one-tap sign-in link.";
+    } else if (chosenPlan === "pro") { $("authGo").textContent = "Create account"; }
+    $("authOverlay").classList.add("open");
+  }
+  function startAuthFlow() {
+    if (sb) {
+      sb.auth.onAuthStateChange(function (ev, session) { if (session && session.user) onSignedIn(session.user); });
+      sb.auth.getSession().then(function (res) {
+        if (res.data && res.data.session) { onSignedIn(res.data.session.user); }
+        else { showAuth(); }
+      });
+    } else if (!ACCOUNT) { showAuth(); }
+    else { afterAuth(); }
+  }
 
   /* ---------- init ---------- */
   $("qMode").textContent = BANKS[S.mode].label;
   document.querySelectorAll("#modeSeg button").forEach(function (b) { b.classList.toggle("on", b.dataset.mode === S.mode); });
   newQuestion();
-  if (!ACCOUNT) {
-    if (chosenPlan === "pro") { $("planFlag").style.display = "inline-block"; $("authGo").textContent = "Create account"; }
-    $("authOverlay").classList.add("open");
-  } else { afterAuth(); }
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    var sbScript = document.createElement("script");
+    sbScript.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
+    sbScript.onload = function () { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); startAuthFlow(); };
+    sbScript.onerror = function () { startAuthFlow(); };
+    document.head.appendChild(sbScript);
+  } else { startAuthFlow(); }
 })();
 </script>
 </body>
