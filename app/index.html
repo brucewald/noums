@@ -1307,7 +1307,36 @@
   }
   $("authGo").addEventListener("click", doSignup);
   $("authEmail").addEventListener("keydown", function (e) { if (e.key === "Enter") doSignup(); });
-  $("authGoogle").addEventListener("click", function () { $("gNote").style.display = "block"; });
+  var GOOGLE_CLIENT_ID = ""; /* paste your Google OAuth client ID here to enable Google sign-in */
+  var gisReady = false;
+  function googleSignIn() {
+    var tc = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: "openid email profile",
+      callback: function (resp) {
+        if (!resp || !resp.access_token) return;
+        fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } })
+          .then(function (r) { return r.json(); })
+          .then(function (u) {
+            if (!u || !u.email) return;
+            ACCOUNT = { email: u.email, name: u.name || "", plan: chosenPlan, created: Date.now(), via: "google" };
+            saveJSON("noums.account", ACCOUNT);
+            $("authOverlay").classList.remove("open");
+            afterAuth();
+          });
+      }
+    });
+    tc.requestAccessToken();
+  }
+  $("authGoogle").addEventListener("click", function () {
+    if (!GOOGLE_CLIENT_ID) { $("gNote").style.display = "block"; return; }
+    if (gisReady && window.google && google.accounts && google.accounts.oauth2) { googleSignIn(); return; }
+    var sc = document.createElement("script");
+    sc.src = "https://accounts.google.com/gsi/client";
+    sc.onload = function () { gisReady = true; googleSignIn(); };
+    sc.onerror = function () { $("gNote").textContent = "Couldn't reach Google — check your connection and try again."; $("gNote").style.display = "block"; };
+    document.head.appendChild(sc);
+  });
   $("signOut").addEventListener("click", function () {
     try { localStorage.removeItem("noums.account"); } catch (e) {}
     location.reload();

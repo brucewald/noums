@@ -120,12 +120,12 @@
 
   /* MARQUEE STRIP */
   .strip { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--card-2); }
-  .strip-in { display: flex; gap: 40px; align-items: center; justify-content: space-between; padding: 20px 0; flex-wrap: wrap; }
+  .strip-in { display: flex; gap: 40px; align-items: center; justify-content: space-between; padding-top: 20px; padding-bottom: 20px; flex-wrap: wrap; }
   .strip-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
   .strip-item .n { font-family: var(--font-display); font-weight: 700; font-size: 26px; letter-spacing: -0.02em; white-space: nowrap; }
   .strip-item .l { font-size: 14px; color: var(--muted); }
   @media (max-width: 720px) {
-    .strip-in { flex-direction: column; align-items: flex-start; gap: 16px; padding: 22px 0; }
+    .strip-in { flex-direction: column; align-items: flex-start; gap: 16px; padding-top: 22px; padding-bottom: 22px; }
     .strip-item { flex-wrap: wrap; }
   }
 

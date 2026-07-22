@@ -68,3 +68,16 @@ would require a purchase approach. Available as of 2026-07-21:
 - [ ] Presentation mode (rehearse against your own talking points)
 - [ ] Pressure mode (Pro) — see `design/mockup.html`
 - [ ] Accounts + sync (first real backend feature, gates the Pro tier)
+
+## Enabling Google sign-in
+
+The button is wired but dormant until an OAuth client ID is set:
+
+1. Go to https://console.cloud.google.com → create a project (e.g. "noums").
+2. APIs and Services → OAuth consent screen → External → app name "noums",
+   add your email, save through the steps (no scopes needed beyond default).
+3. APIs and Services → Credentials → Create credentials → OAuth client ID →
+   type "Web application" → add Authorized JavaScript origin
+   `https://brucewald.github.io` (add your custom domain later too).
+4. Copy the client ID (ends in `.apps.googleusercontent.com`) and paste it
+   into `GOOGLE_CLIENT_ID` in `app/index.html`. Push — done.
