@@ -63,7 +63,7 @@ would require a purchase approach. Available as of 2026-07-21:
 
 ## Roadmap
 
-- [ ] Deploy (any static host: Cloudflare Pages, Netlify, GitHub Pages)
+- [x] Deployed — https://brucewald.github.io/noums/ (GitHub Pages, auto-deploys on push to main)
 - [x] Audio-level filler detection (pitch-stability analysis) + confident-pause and stall tracking
 - [ ] Presentation mode (rehearse against your own talking points)
 - [ ] Pressure mode (Pro) — see `design/mockup.html`
