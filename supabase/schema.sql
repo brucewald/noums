@@ -33,3 +33,10 @@ create policy "users delete own sessions"
   using (auth.uid() = user_id);
 
 create index sessions_user_t on public.sessions (user_id, t);
+
+-- Newer Supabase projects don't auto-grant table access to the API roles.
+-- Signed-in users (role "authenticated") need these; RLS above still
+-- restricts them to their own rows. The "anon" role gets nothing.
+grant usage on schema public to authenticated;
+grant select, insert, delete on public.sessions to authenticated;
+
