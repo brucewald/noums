@@ -697,6 +697,9 @@
   var startTime = 0, timerIv = null;
   var fillerTimes = [], pauses = 0, stalls = 0;
   var acousticQueue = [], lastTranscriptVocal = 0, vRun = null, silStart = 0, hadSpeech = false, frameN = 0;
+  var pendingRun = null, vGapFrames = 0, wasSpeaking = false, speechOnsetT = 0, onsetGap = 0;
+  var lastInterimT = 0, prevInterim = "", lastPauseInfo = null, lastVocalEnd = 0;
+  var PMARK = '<span class="pmark">◦ pause</span> ';
   var VOCAL = ["um", "uh", "er", "ah"];
   var warn = $("supportWarn");
   if (!SR) {
@@ -762,26 +765,42 @@
       var v = s / denom;
       if (v > best) { best = v; bestLag = lag; }
     }
-    return (best > 0.6 && bestLag) ? sr / bestLag : 0;
+    return (best > 0.7 && bestLag) ? sr / bestLag : 0;
   }
 
-  function evalRun(r, tEnd) {
-    var dur = (tEnd - r.start) / 1000;
-    if (dur < 0.24 || dur > 1.6 || r.pitches.length < 4) return;
+  function evalRun(r) {
+    var dur = (r.end - r.start) / 1000;
+    if (dur < 0.25 || dur > 1.5 || r.pitches.length < 6) return;
+    /* a real um/uh is its own utterance: the voiced run must start right at
+       the onset of a speech burst that itself followed real silence —
+       otherwise it's just a steady vowel inside a word */
+    if (r.lead > 0.2 || r.preGap < 0.15) return;
     var mean = 0;
     r.pitches.forEach(function (p) { mean += p; });
     mean /= r.pitches.length;
     var maxDev = 0;
     r.pitches.forEach(function (p) { var d = Math.abs(p - mean); if (d > maxDev) maxDev = d; });
-    if (maxDev / mean > 0.12) return;
+    if (maxDev / mean > 0.1) return;
     var now = Date.now();
     if (now - lastTranscriptVocal < 1500) return;
-    if (S.fillers.indexOf("um") === -1 && S.fillers.indexOf("uh") === -1) return;
+    /* if the transcriber heard actual words during this sound, it was a word —
+       recognizers drop true fillers from the transcript */
+    if (lastInterimT >= r.start) return;
+    var label = VOCAL.filter(function (f) { return S.fillers.indexOf(f) > -1; })[0];
+    if (!label) return;
+    /* the silence leading into this filler got counted as a confident pause — take it back */
+    if (lastPauseInfo && Math.abs(r.start - lastPauseInfo.t) < 600) {
+      pauses = Math.max(0, pauses - 1);
+      var pi = markedFinalHtml.lastIndexOf(PMARK);
+      if (pi > -1) markedFinalHtml = markedFinalHtml.slice(0, pi) + markedFinalHtml.slice(pi + PMARK.length);
+      lastPauseInfo = null;
+    }
+    lastVocalEnd = r.end;
     acousticQueue.push(now);
-    counts["um"] = (counts["um"] || 0) + 1;
+    counts[label] = (counts[label] || 0) + 1;
     totalFillers++;
     fillerTimes.push(now);
-    markedFinalHtml += '<span class="fill heard" title="heard in the audio">um</span> ';
+    markedFinalHtml += '<span class="fill heard" title="heard in the audio">' + label + "</span> ";
     renderTranscript();
   }
 
@@ -790,26 +809,45 @@
     if (speaking) {
       if (hadSpeech && silStart) {
         var gap = (t - silStart) / 1000;
-        if (gap >= 0.6 && gap <= 2.5) {
+        /* silence trailing a vocal filler isn't a confident pause */
+        var afterVocal = lastVocalEnd && Math.abs(silStart - lastVocalEnd) < 600;
+        if (gap >= 0.6 && gap <= 2.5 && !afterVocal) {
           pauses++;
-          markedFinalHtml += '<span class="pmark">◦ pause</span> ';
+          lastPauseInfo = { t: t };
+          markedFinalHtml += PMARK;
           renderTranscript();
         } else if (gap >= 4) { stalls++; }
+      }
+      if (!wasSpeaking) {
+        speechOnsetT = t;
+        onsetGap = hadSpeech ? (silStart ? (t - silStart) / 1000 : 0) : 99;
       }
       silStart = 0;
       hadSpeech = true;
     } else if (rms < SIL_T && !silStart) {
       silStart = t;
     }
-    if (S.acoustic === false || !speaking) {
-      if (!speaking && vRun) { evalRun(vRun, t); vRun = null; }
+    /* a candidate run only counts once trailing silence confirms it stood alone */
+    if (pendingRun) {
+      if (speaking) { pendingRun = null; }
+      else if (t - pendingRun.end >= 250) { evalRun(pendingRun); pendingRun = null; }
+    }
+    if (S.acoustic === false) { vRun = null; wasSpeaking = speaking; return; }
+    if (!speaking) {
+      if (vRun) { vRun.end = t; pendingRun = vRun; vRun = null; vGapFrames = 0; }
+      wasSpeaking = false;
       return;
     }
     var pitch = detectPitch(buf, sr);
     if (pitch > 0) {
-      if (!vRun) vRun = { start: t, pitches: [] };
+      if (!vRun) vRun = { start: t, pitches: [], lead: (t - speechOnsetT) / 1000, preGap: onsetGap };
       vRun.pitches.push(pitch);
-    } else if (vRun) { evalRun(vRun, t); vRun = null; }
+      vGapFrames = 0;
+    } else if (vRun && ++vGapFrames > 4) {
+      /* voicing broke while still speaking — a consonant, so this was a word */
+      vRun = null; vGapFrames = 0;
+    }
+    wasSpeaking = true;
   }
 
   /* waveform + analysis loop */
@@ -856,6 +894,8 @@
     finalText = ""; interimText = ""; markedFinalHtml = ""; counts = {}; totalFillers = 0; levels = [];
     fillerTimes = []; pauses = 0; stalls = 0; acousticQueue = []; lastTranscriptVocal = 0;
     vRun = null; silStart = 0; hadSpeech = false; frameN = 0;
+    pendingRun = null; vGapFrames = 0; wasSpeaking = false; speechOnsetT = 0; onsetGap = 0;
+    lastInterimT = 0; prevInterim = ""; lastPauseInfo = null; lastVocalEnd = 0;
     renderTranscript();
     recognizing = true;
     startTime = Date.now();
@@ -891,6 +931,12 @@
         var txt = e.results[i][0].transcript;
         if (e.results[i].isFinal) { finalText += txt + " "; markedFinalHtml += markFillers(txt + " ", true); }
         else interimText += txt;
+      }
+      if (interimText && interimText !== prevInterim) {
+        prevInterim = interimText;
+        /* only real words count as transcript activity — a filler the recognizer
+           happens to emit shouldn't suppress the acoustic detector */
+        if (!/\b(um+|uh+|er+|ah+|a|mm+|hm+)\W*$/i.test(interimText)) lastInterimT = Date.now();
       }
       renderTranscript();
     };
