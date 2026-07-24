@@ -119,6 +119,18 @@
   .chip.zero b { color: var(--good-ink); }
   .chip.total { background: var(--amber-wash); border-color: transparent; color: var(--amber-ink); }
   .fill.heard { border-bottom: 2px dotted var(--amber); }
+  .transcript .fill[data-fid] { cursor: pointer; }
+  .transcript .fill[data-fid]:hover { background: var(--amber); color: #fff; }
+  .transcript .fill.dismissed, .transcript .fill.dismissed:hover { opacity: .5; text-decoration: line-through; background: var(--paper-2); color: var(--muted); border-bottom: none; }
+  .cal-overlay { position: fixed; inset: 0; background: rgba(43,38,32,.45); display: none; align-items: center; justify-content: center; z-index: 70; padding: 18px; }
+  .cal-overlay.open { display: flex; }
+  .cal-box { max-width: 440px; width: 100%; background: var(--paper); border: 1px solid var(--line); border-radius: 20px; padding: 30px 32px; box-sizing: border-box; }
+  .cal-sub { font-size: 14px; color: var(--ink-soft); line-height: 1.55; margin: 8px 0 0 0; }
+  .cal-sentence { font-family: var(--font-display); font-weight: 700; font-size: 17px; line-height: 1.4; background: var(--paper-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-top: 16px; }
+  .cal-meter { height: 10px; border-radius: 999px; background: var(--cream-2); margin-top: 18px; overflow: hidden; }
+  .cal-meter > div { height: 100%; width: 0%; background: var(--good); border-radius: 999px; transition: width .1s linear; }
+  .cal-progress { font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px; }
+  .cal-actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
   .transcript .pmark { color: var(--good-ink); background: var(--good-wash); padding: 1px 6px; border-radius: 6px; font-weight: 600; font-size: 11px; }
   .warn { margin-top: 14px; background: var(--amber-wash); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); border-radius: var(--radius-sm); padding: 12px 15px; font-size: 13px; color: var(--amber-ink); display: none; }
   .warn.on { display: block; }
@@ -383,7 +395,7 @@
         </div>
         <div class="card replay-card">
           <h3>Your answer, marked up</h3>
-          <p class="p-sub">Fillers highlighted in amber</p>
+          <p class="p-sub">Fillers highlighted in amber — tap one if we got it wrong</p>
           <div class="transcript" id="finalTranscript" style="flex:1"></div>
           <div class="tip" id="tipBox" style="display:none">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12c1 1 1 2 1 3h6c0-1 0-2 1-3a7 7 0 0 0-4-12Z"/></svg>
@@ -483,6 +495,10 @@
           <div class="lbl"><div class="t1">Vocal filler detection <span class="pro-pill" style="color:var(--amber-ink);background:var(--amber-wash)">Beta</span></div><div class="t2">Listens for "um"/"uh" sounds the transcriber misses</div></div>
           <span class="toggle" id="setAcoustic"><span class="switch" aria-hidden="true"></span><span id="setAcousticLabel">On</span></span>
         </div>
+        <div class="set-row">
+          <div class="lbl"><div class="t1">Mic calibration</div><div class="t2" id="calStatus">Using default levels</div></div>
+          <button class="btn-ghost" id="calOpenBtn" style="padding:9px 18px;font-size:13.5px">Calibrate</button>
+        </div>
       </div>
       <div class="card set-card">
         <h3>Tracked fillers</h3>
@@ -549,6 +565,19 @@
 </div>
 
 <!-- ONBOARDING -->
+<div class="cal-overlay" id="calModal" role="dialog" aria-modal="true" aria-labelledby="calTitle">
+  <div class="cal-box">
+    <h3 id="calTitle">Calibrate your mic</h3>
+    <p class="cal-sub" id="calSub">noums listens for the difference between your voice and silence. A quick 10-second check tunes it to this mic and room — it makes filler detection much more accurate.</p>
+    <div class="cal-sentence" id="calSentence" style="display:none">&ldquo;I practice speaking clearly, and I pause instead of filling the silence.&rdquo;</div>
+    <div class="cal-meter"><div id="calMeterFill"></div></div>
+    <div class="cal-progress" id="calProgress">&nbsp;</div>
+    <div class="cal-actions">
+      <button class="btn-accent" id="calGo">Start calibration</button>
+      <button class="btn-ghost" id="calSkip">Use defaults</button>
+    </div>
+  </div>
+</div>
 <div class="onb" id="onb">
   <div class="onb-card">
     <div class="onb-step on" data-step="0">
@@ -695,7 +724,8 @@
   var recognizing = false, recog = null, audioCtx = null, analyser = null, micStream = null;
   var finalText = "", interimText = "", markedFinalHtml = "", counts = {}, totalFillers = 0;
   var startTime = 0, timerIv = null;
-  var fillerTimes = [], pauses = 0, stalls = 0;
+  var fillerEvents = [], nextFid = 1, lastRecap = null, pauses = 0, stalls = 0;
+  function activeFillerTimes() { return fillerEvents.filter(function (e) { return !e.dis; }).map(function (e) { return e.t; }); }
   var acousticQueue = [], lastTranscriptVocal = 0, vRun = null, silStart = 0, hadSpeech = false, frameN = 0;
   var pendingRun = null, vGapFrames = 0, wasSpeaking = false, speechOnsetT = 0, onsetGap = 0;
   var lastInterimT = 0, prevInterim = "", lastPauseInfo = null, lastVocalEnd = 0;
@@ -714,6 +744,7 @@
     activeFillers().forEach(function (f) {
       var re = new RegExp("\\b(" + f.replace(/ /g, "\\s+") + ")\\b", "gi");
       out = out.replace(re, function (m) {
+        var fid = 0;
         if (countThem) {
           var now = Date.now(), deduped = false;
           if (VOCAL.indexOf(f) > -1) {
@@ -721,9 +752,14 @@
             while (acousticQueue.length && now - acousticQueue[0] > 4000) acousticQueue.shift();
             if (acousticQueue.length) { acousticQueue.shift(); deduped = true; }
           }
-          if (!deduped) { counts[f] = (counts[f] || 0) + 1; totalFillers++; fillerTimes.push(now); }
+          if (!deduped) {
+            counts[f] = (counts[f] || 0) + 1; totalFillers++;
+            fid = nextFid++;
+            fillerEvents.push({ id: fid, f: f, t: now, dis: false });
+          }
         }
-        return '<span class="fill">' + m + "</span>";
+        if (!fid) return '<span class="fill">' + m + "</span>";
+        return '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + m + "</span>";
       });
     });
     return out;
@@ -748,7 +784,13 @@
   renderTally();
 
   /* ---- audio analysis: vocal fillers + pauses ---- */
-  var SIL_T = 0.008, SPEECH_T = 0.016;
+  var DEFAULT_SIL = 0.008, DEFAULT_SPEECH = 0.016;
+  var SIL_T = DEFAULT_SIL, SPEECH_T = DEFAULT_SPEECH;
+  function applyCal() {
+    SIL_T = (S.cal && S.cal.sil) || DEFAULT_SIL;
+    SPEECH_T = (S.cal && S.cal.speech) || DEFAULT_SPEECH;
+  }
+  applyCal();
 
   function detectPitch(buf, sr) {
     var n = buf.length;
@@ -799,8 +841,9 @@
     acousticQueue.push(now);
     counts[label] = (counts[label] || 0) + 1;
     totalFillers++;
-    fillerTimes.push(now);
-    markedFinalHtml += '<span class="fill heard" title="heard in the audio">' + label + "</span> ";
+    var fid = nextFid++;
+    fillerEvents.push({ id: fid, f: label, t: now, dis: false });
+    markedFinalHtml += '<span class="fill heard" data-fid="' + fid + '" title="heard in the audio — tap to remove if wrong">' + label + "</span> ";
     renderTranscript();
   }
 
@@ -892,7 +935,8 @@
   function startEngine() {
     if (!SR) { warn.classList.add("on"); return; }
     finalText = ""; interimText = ""; markedFinalHtml = ""; counts = {}; totalFillers = 0; levels = [];
-    fillerTimes = []; pauses = 0; stalls = 0; acousticQueue = []; lastTranscriptVocal = 0;
+    fillerEvents = []; nextFid = 1; lastRecap = null; pauses = 0; stalls = 0; acousticQueue = []; lastTranscriptVocal = 0;
+    applyCal();
     vRun = null; silStart = 0; hadSpeech = false; frameN = 0;
     pendingRun = null; vGapFrames = 0; wasSpeaking = false; speechOnsetT = 0; onsetGap = 0;
     lastInterimT = 0; prevInterim = ""; lastPauseInfo = null; lastVocalEnd = 0;
@@ -969,9 +1013,168 @@
   }
 
   $("recBtn").addEventListener("click", function () {
-    if (recognizing) { endSession(); } else { startEngine(); }
+    if (recognizing) { endSession(); return; }
+    if (!S.cal && !loadJSON("noums.calPrompted", false)) {
+      saveJSON("noums.calPrompted", true);
+      calOpen();
+      return;
+    }
+    startEngine();
   });
   $("endBtn").addEventListener("click", function () { if (recognizing) endSession(); });
+
+  /* ---- tap a marked filler to dismiss it ---- */
+  function computeStats(elapsed, words, endT) {
+    var mins = elapsed / 60;
+    var fpm = totalFillers / mins;
+    var bounds = [startTime].concat(activeFillerTimes(), [endT]);
+    var longest = 0;
+    for (var bi = 1; bi < bounds.length; bi++) longest = Math.max(longest, bounds[bi] - bounds[bi - 1]);
+    var cleanSec = Math.min(Math.round(longest / 1000), Math.round(elapsed));
+    var score = Math.max(30, Math.min(99, Math.round(100 - fpm * 7 - stalls * 2 + Math.min(8, pauses) - (words < 20 ? 15 : 0))));
+    return { fpm: fpm, clean: cleanSec, score: score };
+  }
+
+  function refreshRecapAfterEdit() {
+    if (!lastRecap) return;
+    var st = computeStats(lastRecap.elapsed, lastRecap.words, lastRecap.endT);
+    $("mFill").textContent = totalFillers;
+    $("mFpm").textContent = (Math.round(st.fpm * 10) / 10) + " / min";
+    $("mClean").textContent = lastRecap.words ? (st.clean >= 60 ? fmtDur(st.clean) : st.clean + "s") : "—";
+    renderBars($("barsWrap"), counts, true);
+    document.querySelectorAll("#barsWrap .bar-fill").forEach(function (b) { b.style.width = b.getAttribute("data-w") + "%"; });
+    var circ = 314;
+    $("ringFg").style.stroke = st.score >= 70 ? "var(--good)" : "var(--amber)";
+    $("ringFg").style.strokeDashoffset = circ - circ * (st.score / 100);
+    $("ringNum").textContent = st.score;
+    $("finalTranscript").innerHTML = markedFinalHtml || '<span class="placeholder">No transcript captured.</span>';
+    var sess = lastRecap.sess;
+    if (sess) {
+      sess.fillers = totalFillers; sess.counts = counts; sess.score = st.score;
+      sess.fpm = Math.round(st.fpm * 10) / 10; sess.clean = st.clean;
+      persistSessions();
+      if (sb && signedInHandled) sb.from("sessions").update({ fillers: sess.fillers, counts: sess.counts, score: sess.score, fpm: sess.fpm, clean: sess.clean }).eq("t", new Date(sess.t).toISOString()).then(function () {});
+    }
+  }
+
+  function toggleFiller(fid) {
+    var ev = null;
+    for (var i = 0; i < fillerEvents.length; i++) if (fillerEvents[i].id === fid) { ev = fillerEvents[i]; break; }
+    if (!ev) return;
+    ev.dis = !ev.dis;
+    counts[ev.f] = Math.max(0, (counts[ev.f] || 0) + (ev.dis ? -1 : 1));
+    totalFillers = Math.max(0, totalFillers + (ev.dis ? -1 : 1));
+    var re = new RegExp('class="(fill[^"]*?)( dismissed)?" data-fid="' + fid + '"');
+    markedFinalHtml = markedFinalHtml.replace(re, function (m, base) {
+      return 'class="' + base + (ev.dis ? " dismissed" : "") + '" data-fid="' + fid + '"';
+    });
+    if (recognizing) renderTranscript();
+    else refreshRecapAfterEdit();
+  }
+  function fillClickHandler(e) {
+    var el = e.target && e.target.closest ? e.target.closest("[data-fid]") : null;
+    if (!el) return;
+    toggleFiller(parseInt(el.getAttribute("data-fid"), 10));
+  }
+  $("transcript").addEventListener("click", fillClickHandler);
+  $("finalTranscript").addEventListener("click", fillClickHandler);
+
+  /* ---------- mic calibration ---------- */
+  var calStream = null, calCtx = null, calRaf = 0, calRunning = false, calDone = false;
+  function calStop() {
+    calRunning = false;
+    if (calRaf) { cancelAnimationFrame(calRaf); calRaf = 0; }
+    if (calStream) { calStream.getTracks().forEach(function (t) { t.stop(); }); calStream = null; }
+    if (calCtx) { try { calCtx.close(); } catch (e) {} calCtx = null; }
+  }
+  function calClose() { calStop(); $("calModal").classList.remove("open"); }
+  function calOpen() {
+    calDone = false;
+    $("calSentence").style.display = "none";
+    $("calMeterFill").style.width = "0%";
+    $("calProgress").innerHTML = "&nbsp;";
+    $("calSub").textContent = "noums listens for the difference between your voice and silence. A quick 10-second check tunes it to this mic and room — it makes filler detection much more accurate.";
+    $("calGo").textContent = "Start calibration";
+    $("calGo").style.display = "";
+    $("calModal").classList.add("open");
+  }
+  function percentile(arr, p) {
+    var a = arr.slice().sort(function (x, y) { return x - y; });
+    return a.length ? a[Math.min(a.length - 1, Math.floor(a.length * p))] : 0;
+  }
+  function runCalibration() {
+    if (calRunning) return;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      calStream = stream;
+      calCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var src = calCtx.createMediaStreamSource(stream);
+      var an = calCtx.createAnalyser();
+      an.fftSize = 2048;
+      src.connect(an);
+      calRunning = true;
+      $("calGo").style.display = "none";
+      var buf = new Float32Array(an.fftSize);
+      var phase = "quiet", phaseStart = performance.now(), quiet = [], talk = [];
+      var QUIET_MS = 4000, TALK_MS = 6000;
+      $("calSub").textContent = "Step 1 of 2 — stay quiet. We're measuring your room's background noise.";
+      function tick(now) {
+        if (!calRunning) return;
+        an.getFloatTimeDomainData(buf);
+        var sum = 0;
+        for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        var rms = Math.sqrt(sum / buf.length);
+        $("calMeterFill").style.width = Math.min(100, rms * 400) + "%";
+        var el = now - phaseStart;
+        if (phase === "quiet") {
+          quiet.push(rms);
+          $("calProgress").textContent = "listening to the room… " + Math.ceil((QUIET_MS - el) / 1000) + "s";
+          if (el >= QUIET_MS) {
+            phase = "talk"; phaseStart = now;
+            $("calSub").textContent = "Step 2 of 2 — read this out loud at your normal speaking volume:";
+            $("calSentence").style.display = "block";
+          }
+        } else {
+          talk.push(rms);
+          $("calProgress").textContent = "listening to your voice… " + Math.ceil((TALK_MS - el) / 1000) + "s";
+          if (el >= TALK_MS) { calFinish(quiet, talk); return; }
+        }
+        calRaf = requestAnimationFrame(tick);
+      }
+      calRaf = requestAnimationFrame(tick);
+    }).catch(function () {
+      $("calSub").textContent = "Couldn't open the microphone — check the mic permission for this page, then try again.";
+      $("calGo").textContent = "Try again";
+      $("calGo").style.display = "";
+    });
+  }
+  function calFinish(quiet, talk) {
+    calStop();
+    $("calSentence").style.display = "none";
+    $("calMeterFill").style.width = "0%";
+    var noise = percentile(quiet, 0.9);
+    var voice = percentile(talk, 0.75);
+    if (voice < Math.max(noise * 2.5, 0.006)) {
+      $("calSub").textContent = "We couldn't hear your voice clearly over the background noise. Move somewhere quieter or closer to the mic and try again.";
+      $("calProgress").innerHTML = "&nbsp;";
+      $("calGo").textContent = "Try again";
+      $("calGo").style.display = "";
+      return;
+    }
+    var sil = Math.min(Math.max(noise * 1.8, 0.002), 0.03, voice * 0.3);
+    var speech = Math.min(Math.max(sil * 2, noise * 3.5, voice * 0.35), 0.12);
+    S.cal = { sil: Math.round(sil * 1e4) / 1e4, speech: Math.round(speech * 1e4) / 1e4, t: Date.now() };
+    persist();
+    applyCal();
+    calDone = true;
+    $("calSub").textContent = "Done — noums is tuned to this mic and room. Recalibrate from Settings any time you switch setups.";
+    $("calProgress").textContent = "noise floor " + S.cal.sil + " · speech level " + S.cal.speech;
+    $("calGo").textContent = "Start practicing";
+    $("calGo").style.display = "";
+    if ($("view-settings") && $("view-settings").classList.contains("on")) renderSettings();
+  }
+  $("calGo").addEventListener("click", function () { if (calDone) calClose(); else runCalibration(); });
+  $("calSkip").addEventListener("click", calClose);
+  $("calOpenBtn").addEventListener("click", calOpen);
 
   /* ---------- recap ---------- */
   function endSession() {
@@ -982,13 +1185,10 @@
 
     var words = finalText.trim() ? finalText.trim().split(/\s+/).length : 0;
     var mins = elapsed / 60;
-    var fpm = totalFillers / mins;
     var wpm = Math.round(words / mins);
-    var bounds = [startTime].concat(fillerTimes, [Date.now()]);
-    var longest = 0;
-    for (var bi = 1; bi < bounds.length; bi++) longest = Math.max(longest, bounds[bi] - bounds[bi - 1]);
-    var cleanSec = Math.min(Math.round(longest / 1000), Math.round(elapsed));
-    var score = Math.max(30, Math.min(99, Math.round(100 - fpm * 7 - stalls * 2 + Math.min(8, pauses) - (words < 20 ? 15 : 0))));
+    var endNow = Date.now();
+    var st = computeStats(elapsed, words, endNow);
+    var fpm = st.fpm, cleanSec = st.clean, score = st.score;
 
     var prev = SESSIONS.length ? SESSIONS[SESSIONS.length - 1] : null;
     if (words > 0) {
@@ -998,6 +1198,7 @@
       updateSideStreak();
       if (sb && signedInHandled) sb.from("sessions").insert([rowFromLocal(SESSIONS[SESSIONS.length - 1])]).then(function () {});
     }
+    lastRecap = { elapsed: elapsed, words: words, endT: endNow, sess: words > 0 ? SESSIONS[SESSIONS.length - 1] : null };
 
     $("recapSub").textContent = BANKS[S.mode].label + " · " + fmtDur(Math.round(elapsed));
     $("mFill").textContent = totalFillers;
@@ -1243,9 +1444,10 @@
     $("langSel").value = S.lang;
     $("setAcoustic").classList.toggle("on", S.acoustic !== false);
     $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
+    $("calStatus").textContent = S.cal ? "Calibrated " + new Date(S.cal.t).toLocaleDateString() : "Using default levels — calibrate for best accuracy";
     if (ACCOUNT) {
       $("accEmail").textContent = ACCOUNT.email;
-      $("accPlan").textContent = ACCOUNT.plan === "pro" ? "Pro (beta) — free for now" : "Free plan";
+      $("accPlan").textContent = ACCOUNT.founder ? "Pro — founder · admin, free forever" : (ACCOUNT.plan === "pro" ? "Pro (beta) — free for now" : "Free plan");
     }
     $("setCamDefault").classList.toggle("on", !!S.camDefault);
     $("setCamLabel").textContent = S.camDefault ? "On by default" : "Off by default";
@@ -1340,6 +1542,15 @@
 
   /* ---------- account ---------- */
   var ACCOUNT = loadJSON("noums.account", null);
+  /* founder allowlist: pro forever + admin flag for future gated features */
+  var FOUNDERS = ["bruce@waldschmidt.com"];
+  function applyFounder() {
+    if (ACCOUNT && ACCOUNT.email && FOUNDERS.indexOf(String(ACCOUNT.email).toLowerCase()) > -1) {
+      ACCOUNT.founder = true; ACCOUNT.admin = true; ACCOUNT.plan = "pro";
+      saveJSON("noums.account", ACCOUNT);
+    }
+  }
+  applyFounder();
   var chosenPlan = (new URLSearchParams(location.search).get("plan") === "pro") ? "pro" : "free";
   function afterAuth() {
     if (!loadJSON("noums.onboarded", false)) { onbShow(0); onb.classList.add("open"); }
@@ -1366,6 +1577,7 @@
     }
     ACCOUNT = { email: em, plan: chosenPlan, created: Date.now(), via: "email" };
     saveJSON("noums.account", ACCOUNT);
+    applyFounder();
     $("authOverlay").classList.remove("open");
     afterAuth();
   }
@@ -1385,6 +1597,7 @@
             if (!u || !u.email) return;
             ACCOUNT = { email: u.email, name: u.name || "", plan: chosenPlan, created: Date.now(), via: "google" };
             saveJSON("noums.account", ACCOUNT);
+            applyFounder();
             $("authOverlay").classList.remove("open");
             afterAuth();
           });
@@ -1456,6 +1669,7 @@
     var prevPlan = (loadJSON("noums.account", null) || {}).plan;
     ACCOUNT = { email: user.email, name: (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) || "", plan: prevPlan || chosenPlan, created: Date.now(), via: "supabase", uid: user.id };
     saveJSON("noums.account", ACCOUNT);
+    applyFounder();
     $("authOverlay").classList.remove("open");
     syncSessions();
     afterAuth();
