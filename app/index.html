@@ -1463,10 +1463,20 @@
         return res.json();
       }).then(function (data) {
         if (!data || !data.words || !data.words.length) throw new Error("empty");
+        if (DEBUG) {
+          console.log("[noums] tracked fillers:", activeFillers().join(", "));
+          console.log("[noums] deepgram transcript:", data.words.map(function (x) { return x.w; }).join(" "));
+          var seen = {};
+          data.words.forEach(function (x) { var n = normWord(x.w); seen[n] = (seen[n] || 0) + 1; });
+          console.log("[noums] word frequencies:", JSON.stringify(seen));
+        }
         applyModelResult(data, elapsed);
         setVerifyState("done");
       });
-    }).catch(function () { setVerifyState("off"); });
+    }).catch(function (e) {
+      if (DEBUG) console.log("[noums] verify failed:", e && e.message ? e.message : e);
+      setVerifyState("off");
+    });
   }
 
   var TIPS = {
