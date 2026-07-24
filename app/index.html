@@ -264,6 +264,7 @@
   .div-or::before, .div-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .btn-google { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; font-family: var(--font-body); font-weight: 600; font-size: 14.5px; background: var(--paper); border: 1.5px solid var(--line-2); border-radius: 999px; padding: 12px 20px; cursor: pointer; color: var(--ink); box-sizing: border-box; }
   .btn-google:hover { background: var(--paper-2); }
+  .g-btn-wrap { display: none; justify-content: center; min-height: 44px; }
   .auth-err { display: none; color: var(--accent-ink); font-size: 12.5px; margin: -2px 0 10px 6px; }
   .auth-note { font-size: 12px; color: var(--muted-2); margin-top: 14px; text-align: center; }
 
@@ -555,6 +556,7 @@
     <button class="btn-accent btn-block" id="authGo">Create free account</button>
     <div class="auth-err" id="authMsg" style="color:var(--good-ink)"></div>
     <div class="div-or">or</div>
+    <div class="g-btn-wrap" id="gBtn"></div>
     <button class="btn-google" id="authGoogle">
       <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.4 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.4-5.5l-7.5-5.8c-2.1 1.4-4.8 2.3-7.9 2.3-6.3 0-11.7-3.9-13.6-9.3l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
       Continue with Google
@@ -1688,8 +1690,66 @@
   $("authGo").addEventListener("click", doSignup);
   $("authEmail").addEventListener("keydown", function (e) { if (e.key === "Enter") doSignup(); });
   var GOOGLE_CLIENT_ID = "943923799348-upvqmuigpf54vqkqnuja1mqu0d9kq4vf.apps.googleusercontent.com";
-  var gisReady = false;
-  function googleSignIn() {
+  var gisReady = false, gisNonce = null, gBtnDone = false;
+
+  function loadGis() {
+    return new Promise(function (resolve, reject) {
+      if (gisReady && window.google && google.accounts && google.accounts.id) { resolve(); return; }
+      var sc = document.createElement("script");
+      sc.src = "https://accounts.google.com/gsi/client";
+      sc.async = true;
+      sc.onload = function () { gisReady = true; resolve(); };
+      sc.onerror = reject;
+      document.head.appendChild(sc);
+    });
+  }
+  /* Google wants the nonce hashed; Supabase verifies against the raw one */
+  function makeNonce() {
+    try {
+      var bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      var hex = function (b) { return ("0" + b.toString(16)).slice(-2); };
+      var raw = Array.prototype.map.call(bytes, hex).join("");
+      return crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)).then(function (buf) {
+        return { raw: raw, hashed: Array.prototype.map.call(new Uint8Array(buf), hex).join("") };
+      }).catch(function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  function googleRedirect() {
+    if (sb) sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+  }
+  /* ID-token flow: the credential is minted in this page and handed straight
+     to Supabase, so the browser never visits the project's supabase.co URL —
+     Google's consent screen names noums instead of the project ref. */
+  function onGoogleCredential(resp) {
+    if (!resp || !resp.credential || !sb) return;
+    var opts = { provider: "google", token: resp.credential };
+    if (gisNonce) opts.nonce = gisNonce.raw;
+    sb.auth.signInWithIdToken(opts).then(function (res) {
+      if (res && res.error) googleRedirect();
+    }, googleRedirect);
+  }
+  function initGoogleButton() {
+    if (gBtnDone || !sb || !GOOGLE_CLIENT_ID) return;
+    var wrap = $("gBtn");
+    /* the wrapper is hidden until Google's button lands, so size from the
+       visible fallback button instead */
+    var avail = Math.round($("authGoogle").getBoundingClientRect().width);
+    if (!wrap || !avail) return;
+    gBtnDone = true;
+    loadGis().then(makeNonce).then(function (n) {
+      gisNonce = n;
+      var cfg = { client_id: GOOGLE_CLIENT_ID, callback: onGoogleCredential };
+      if (n) cfg.nonce = n.hashed;
+      google.accounts.id.initialize(cfg);
+      var w = Math.max(200, Math.min(400, avail));
+      google.accounts.id.renderButton(wrap, { type: "standard", theme: "outline", size: "large", shape: "pill", text: "continue_with", logo_alignment: "center", width: w });
+      wrap.style.display = "flex";
+      $("authGoogle").style.display = "none";
+    }).catch(function () { gBtnDone = false; });
+  }
+
+  function googleSignInLocal() {
     var tc = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: "openid email profile",
@@ -1709,18 +1769,14 @@
     });
     tc.requestAccessToken();
   }
+  /* fallback path: only reachable if Google's script never loaded */
   $("authGoogle").addEventListener("click", function () {
-    if (sb) {
-      sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
-      return;
-    }
+    if (sb) { googleRedirect(); return; }
     if (!GOOGLE_CLIENT_ID) { $("gNote").style.display = "block"; return; }
-    if (gisReady && window.google && google.accounts && google.accounts.oauth2) { googleSignIn(); return; }
-    var sc = document.createElement("script");
-    sc.src = "https://accounts.google.com/gsi/client";
-    sc.onload = function () { gisReady = true; googleSignIn(); };
-    sc.onerror = function () { $("gNote").textContent = "Couldn't reach Google — check your connection and try again."; $("gNote").style.display = "block"; };
-    document.head.appendChild(sc);
+    loadGis().then(function () { googleSignInLocal(); }).catch(function () {
+      $("gNote").textContent = "Couldn't reach Google — check your connection and try again.";
+      $("gNote").style.display = "block";
+    });
   });
   $("signOut").addEventListener("click", function () {
     if (sb) {
@@ -1801,6 +1857,7 @@
       document.querySelector("#authOverlay .auth-note").textContent = "No password — we email you a one-tap sign-in link.";
     } else if (chosenPlan === "pro") { $("authGo").textContent = "Create account"; }
     $("authOverlay").classList.add("open");
+    initGoogleButton();
   }
   function startAuthFlow() {
     if (sb) {

@@ -33,6 +33,7 @@
   .btn-ghost:hover { background: var(--paper-2); }
   .inp { font-family: var(--font-body); font-size: 14.5px; border: 1.5px solid var(--line-2); background: var(--paper); border-radius: 999px; padding: 11px 16px; width: 100%; color: var(--ink); }
   .auth-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .g-btn-wrap { display: none; min-height: 44px; }
   .auth-row .inp { flex: 1; min-width: 200px; }
   .note { font-size: 13px; color: var(--muted); margin-top: 12px; }
   .err { font-size: 13.5px; color: var(--accent-ink); background: var(--accent-wash); border-radius: 12px; padding: 10px 14px; margin-top: 14px; display: none; }
@@ -78,6 +79,7 @@
     <h1 style="margin-top:0">Founder sign-in</h1>
     <p class="sub">This dashboard is restricted. Sign in with the founder account — anyone else sees nothing (enforced by the database, not just this page).</p>
     <div class="auth-row">
+      <div class="g-btn-wrap" id="gBtn"></div>
       <button class="btn-accent" id="googleBtn">Continue with Google</button>
     </div>
     <div class="auth-row">
@@ -123,12 +125,70 @@
   var SUPABASE_URL = "https://fkzvfciptxvctewlcizu.supabase.co";
   var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZrenZmY2lwdHh2Y3Rld2xjaXp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4MjA2OTksImV4cCI6MjEwMDM5NjY5OX0.ReQZhRVfFUK_SL4E6mBqZ8aZ-Tp33Cj8hZ1vXFp4K7A";
   var ADMINS = ["bruce@waldschmidt.com"];
+  var GOOGLE_CLIENT_ID = "943923799348-upvqmuigpf54vqkqnuja1mqu0d9kq4vf.apps.googleusercontent.com";
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   function $(id) { return document.getElementById(id); }
 
-  $("googleBtn").addEventListener("click", function () {
+  var gisReady = false, gisNonce = null, gBtnDone = false;
+  function loadGis() {
+    return new Promise(function (resolve, reject) {
+      if (gisReady && window.google && google.accounts && google.accounts.id) { resolve(); return; }
+      var sc = document.createElement("script");
+      sc.src = "https://accounts.google.com/gsi/client";
+      sc.async = true;
+      sc.onload = function () { gisReady = true; resolve(); };
+      sc.onerror = reject;
+      document.head.appendChild(sc);
+    });
+  }
+  /* Google wants the nonce hashed; Supabase verifies against the raw one */
+  function makeNonce() {
+    try {
+      var bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      var hex = function (b) { return ("0" + b.toString(16)).slice(-2); };
+      var raw = Array.prototype.map.call(bytes, hex).join("");
+      return crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)).then(function (buf) {
+        return { raw: raw, hashed: Array.prototype.map.call(new Uint8Array(buf), hex).join("") };
+      }).catch(function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  function googleRedirect() {
     sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
-  });
+  }
+  /* ID-token flow keeps the browser off the project's supabase.co URL, so
+     Google's consent screen names noums instead of the project ref. */
+  function onGoogleCredential(resp) {
+    if (!resp || !resp.credential) return;
+    var opts = { provider: "google", token: resp.credential };
+    if (gisNonce) opts.nonce = gisNonce.raw;
+    sb.auth.signInWithIdToken(opts).then(function (res) {
+      if (res && res.error) googleRedirect();
+    }, googleRedirect);
+  }
+  function initGoogleButton() {
+    if (gBtnDone) return;
+    var wrap = $("gBtn");
+    /* the wrapper is hidden until Google's button lands, so size from the
+       visible fallback button instead */
+    var avail = Math.round($("googleBtn").getBoundingClientRect().width);
+    if (!wrap || !avail) return;
+    gBtnDone = true;
+    loadGis().then(makeNonce).then(function (n) {
+      gisNonce = n;
+      var cfg = { client_id: GOOGLE_CLIENT_ID, callback: onGoogleCredential };
+      if (n) cfg.nonce = n.hashed;
+      google.accounts.id.initialize(cfg);
+      var w = Math.max(200, Math.min(400, avail));
+      google.accounts.id.renderButton(wrap, { type: "standard", theme: "outline", size: "large", shape: "pill", text: "continue_with", logo_alignment: "center", width: w });
+      wrap.style.display = "block";
+      $("googleBtn").style.display = "none";
+    }).catch(function () { gBtnDone = false; });
+  }
+  initGoogleButton();
+
+  /* fallback path: only reachable if Google's script never loaded */
+  $("googleBtn").addEventListener("click", googleRedirect);
   $("magicBtn").addEventListener("click", function () {
     var em = $("emailInp").value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { showErr("That doesn't look like an email address."); return; }
