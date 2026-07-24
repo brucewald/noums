@@ -92,11 +92,11 @@
     <h1>Since launch</h1>
     <p class="sub" id="who">—</p>
     <div class="tiles">
-      <div class="tile"><div class="k">Visits</div><div class="v" id="tVisits">—</div><div class="u">page loads, all time</div></div>
-      <div class="tile"><div class="k">Visits · 7d</div><div class="v" id="tVisits7">—</div><div class="u">last 7 days</div></div>
-      <div class="tile"><div class="k">Practice users</div><div class="v" id="tUsers">—</div><div class="u">signed in &amp; finished ≥1 session</div></div>
-      <div class="tile"><div class="k">Sessions</div><div class="v" id="tSess">—</div><div class="u">practice sessions, all time</div></div>
-      <div class="tile"><div class="k">Sessions · 7d</div><div class="v" id="tSess7">—</div><div class="u">last 7 days</div></div>
+      <div class="tile"><div class="k">Visits</div><div class="v" id="tVisits">—</div><div class="u" id="tVisits7">page loads, all time</div></div>
+      <div class="tile"><div class="k">Signups</div><div class="v" id="tSignups">—</div><div class="u" id="tSignups7">accounts created</div></div>
+      <div class="tile"><div class="k">Practice users</div><div class="v" id="tUsers">—</div><div class="u">signed up &amp; finished ≥1 session</div></div>
+      <div class="tile"><div class="k">Sessions</div><div class="v" id="tSess">—</div><div class="u" id="tSess7">practice sessions, all time</div></div>
+      <div class="tile"><div class="k">Avg fillers / min</div><div class="v" id="tFpm">—</div><div class="u">across every session</div></div>
       <div class="tile"><div class="k">Revenue</div><div class="v" style="color:var(--muted-2)">$0</div><div class="u">payments not wired yet</div></div>
     </div>
     <div class="card">
@@ -174,20 +174,31 @@
       $("tVisits").textContent = fmt(r.count);
     });
     sb.from("visits").select("*", { count: "exact", head: true }).gte("t", d7).then(function (r) {
-      if (!r.error) $("tVisits7").textContent = fmt(r.count);
+      if (!r.error) $("tVisits7").textContent = "+" + fmt(r.count) + " in the last 7 days";
     });
     sb.from("sessions").select("*", { count: "exact", head: true }).then(function (r) {
       if (r.error) return fail(r.error);
       $("tSess").textContent = fmt(r.count);
     });
     sb.from("sessions").select("*", { count: "exact", head: true }).gte("t", d7).then(function (r) {
-      if (!r.error) $("tSess7").textContent = fmt(r.count);
+      if (!r.error) $("tSess7").textContent = "+" + fmt(r.count) + " in the last 7 days";
     });
-    sb.from("sessions").select("user_id").limit(10000).then(function (r) {
+    sb.from("profiles").select("*", { count: "exact", head: true }).then(function (r) {
+      if (r.error) return fail(r.error);
+      $("tSignups").textContent = fmt(r.count);
+    });
+    sb.from("profiles").select("*", { count: "exact", head: true }).gte("created_at", d7).then(function (r) {
+      if (!r.error) $("tSignups7").textContent = "+" + fmt(r.count) + " in the last 7 days";
+    });
+    sb.from("sessions").select("user_id,fpm").limit(10000).then(function (r) {
       if (r.error) return;
-      var set = {};
-      (r.data || []).forEach(function (row) { set[row.user_id] = 1; });
+      var rows = r.data || [], set = {}, sum = 0, n = 0;
+      rows.forEach(function (row) {
+        set[row.user_id] = 1;
+        if (row.fpm !== null && row.fpm !== undefined) { sum += Number(row.fpm); n++; }
+      });
       $("tUsers").textContent = fmt(Object.keys(set).length);
+      $("tFpm").textContent = n ? (Math.round((sum / n) * 10) / 10).toLocaleString() : "—";
     });
     sb.from("visits").select("t,path").gte("t", d30).limit(20000).then(function (r) {
       if (r.error) return fail(r.error);

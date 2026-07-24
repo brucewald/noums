@@ -85,3 +85,45 @@ create policy "admin reads all sessions"
   on public.sessions for select
   using ((auth.jwt() ->> 'email') = 'bruce@waldschmidt.com');
 
+-- ============================================================
+-- v0.3 additions — signup tracking for /admin/
+-- ============================================================
+
+-- Client code can't read auth.users, so mirror the fields the admin
+-- dashboard needs into a profiles table kept current by a trigger.
+create table public.profiles (
+  uid uuid primary key references auth.users(id) on delete cascade,
+  email text,
+  created_at timestamptz not null default now()
+);
+alter table public.profiles enable row level security;
+
+create policy "admin reads profiles"
+  on public.profiles for select
+  to authenticated
+  using ((auth.jwt() ->> 'email') = 'bruce@waldschmidt.com');
+
+grant select on public.profiles to authenticated;
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (uid, email, created_at)
+  values (new.id, new.email, new.created_at)
+  on conflict (uid) do nothing;
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- backfill accounts that signed up before this table existed
+insert into public.profiles (uid, email, created_at)
+select id, email, created_at from auth.users
+on conflict (uid) do nothing;
+
