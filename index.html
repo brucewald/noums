@@ -578,6 +578,21 @@
     });
   });
 })();
+
+/* one lightweight visit ping per browser session — feeds the admin dashboard */
+(function () {
+  try {
+    if (sessionStorage.getItem("noums.pinged./")) return;
+    sessionStorage.setItem("noums.pinged./", "1");
+    var K = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZrenZmY2lwdHh2Y3Rld2xjaXp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4MjA2OTksImV4cCI6MjEwMDM5NjY5OX0.ReQZhRVfFUK_SL4E6mBqZ8aZ-Tp33Cj8hZ1vXFp4K7A";
+    fetch("https://fkzvfciptxvctewlcizu.supabase.co/rest/v1/visits", {
+      method: "POST",
+      headers: { apikey: K, Authorization: "Bearer " + K, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ path: "/" }),
+      keepalive: true
+    }).catch(function () {});
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>

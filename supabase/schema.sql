@@ -40,3 +40,48 @@ create index sessions_user_t on public.sessions (user_id, t);
 grant usage on schema public to authenticated;
 grant select, insert, delete on public.sessions to authenticated;
 
+-- ============================================================
+-- v0.2 additions — run this block in the SQL Editor if the
+-- original schema above is already applied.
+-- ============================================================
+
+-- Dismissing a false-positive filler on the recap updates the saved
+-- session row; the original schema had no update policy, so those
+-- corrections silently never synced.
+create policy "users update own sessions"
+  on public.sessions for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+grant update on public.sessions to authenticated;
+
+-- Lightweight visit pings from the landing page and the app.
+-- Anyone may insert (write-only); only the admin may read.
+create table public.visits (
+  id uuid primary key default gen_random_uuid(),
+  t timestamptz not null default now(),
+  path text not null default '/',
+  uid uuid
+);
+alter table public.visits enable row level security;
+
+create policy "anyone logs a visit"
+  on public.visits for insert
+  to anon, authenticated
+  with check (true);
+
+create policy "admin reads visits"
+  on public.visits for select
+  to authenticated
+  using ((auth.jwt() ->> 'email') = 'bruce@waldschmidt.com');
+
+grant usage on schema public to anon;
+grant insert on public.visits to anon, authenticated;
+grant select on public.visits to authenticated;
+create index visits_t on public.visits (t);
+
+-- Admin (email enforced server-side via the JWT claim) can read every
+-- session row, for aggregate stats in /admin/.
+create policy "admin reads all sessions"
+  on public.sessions for select
+  using ((auth.jwt() ->> 'email') = 'bruce@waldschmidt.com');
+

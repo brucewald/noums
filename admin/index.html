@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>noums — admin</title>
+<style>
+  :root {
+    --cream: #F0EADD; --cream-2: #E9E1D0; --paper: #FBF8F1; --paper-2: #F6F1E6;
+    --ink: #2B2620; --ink-soft: #4E463B; --muted: #8B8173; --muted-2: #A9A08F;
+    --line: #E4DAC8; --line-2: #D6CAB4;
+    --accent: #F1583F; --accent-ink: #B23A26; --accent-wash: #FBE4DD;
+    --good: #3E9C77; --good-ink: #2C6E54; --good-wash: #E1F0E7;
+    --amber: #CE9427; --amber-ink: #8F6716; --amber-wash: #F7ECD4;
+    --font-display: "Helvetica Neue", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  body { background: var(--cream); color: var(--ink); font-family: var(--font-body); line-height: 1.55; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 36px 20px 64px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: -0.03em; }
+  .rec { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-wash); flex: none; }
+  .admin-pill { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; background: var(--paper-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--muted); margin-left: 6px; }
+  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+  h1 { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; font-size: 26px; margin: 26px 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; padding: 24px; }
+  .btn-accent { font-family: var(--font-body); font-weight: 600; font-size: 14.5px; background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 999px; padding: 12px 22px; cursor: pointer; }
+  .btn-accent:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
+  .btn-ghost { font-family: var(--font-body); font-weight: 600; font-size: 13.5px; background: var(--paper); color: var(--ink); border: 1px solid var(--line-2); border-radius: 999px; padding: 9px 18px; cursor: pointer; }
+  .btn-ghost:hover { background: var(--paper-2); }
+  .inp { font-family: var(--font-body); font-size: 14.5px; border: 1.5px solid var(--line-2); background: var(--paper); border-radius: 999px; padding: 11px 16px; width: 100%; color: var(--ink); }
+  .auth-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .auth-row .inp { flex: 1; min-width: 200px; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .err { font-size: 13.5px; color: var(--accent-ink); background: var(--accent-wash); border-radius: 12px; padding: 10px 14px; margin-top: 14px; display: none; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 22px 0; }
+  @media (max-width: 640px) { .tiles { grid-template-columns: 1fr 1fr; } }
+  .tile { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+  .tile .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .tile .v { font-family: var(--font-display); font-weight: 700; font-size: 27px; letter-spacing: -0.03em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tile .u { font-size: 12px; color: var(--muted-2); margin-top: 2px; }
+  .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 8px; }
+  .chart-head h3 { font-family: var(--font-display); font-size: 16px; letter-spacing: -0.01em; }
+  .legend { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .chart { display: flex; align-items: flex-end; gap: 2px; height: 160px; margin-top: 16px; border-bottom: 1px solid var(--line-2); position: relative; }
+  .col { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; justify-content: flex-start; position: relative; cursor: default; }
+  .col .seg { border-radius: 4px 4px 0 0; min-height: 0; }
+  .col .seg.app { background: var(--accent); }
+  .col .seg.landing { background: var(--good); }
+  .col:hover .seg { filter: brightness(0.92); }
+  .col .tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--cream); font-family: var(--font-mono); font-size: 11px; padding: 6px 9px; border-radius: 8px; white-space: nowrap; z-index: 3; }
+  .col:hover .tip { display: block; }
+  .xlab { display: flex; gap: 2px; margin-top: 6px; }
+  .xlab span { flex: 1; font-family: var(--font-mono); font-size: 9.5px; color: var(--muted-2); text-align: center; white-space: nowrap; overflow: visible; }
+  details { margin-top: 16px; font-size: 13px; color: var(--ink-soft); }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  table { border-collapse: collapse; margin-top: 10px; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  th { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .hidden { display: none !important; }
+  a { color: var(--accent-ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="brand"><span class="rec" aria-hidden="true"></span>noums<span class="admin-pill">admin</span></div>
+    <div><a class="btn-ghost" style="text-decoration:none;display:inline-block" href="../app/">Open app</a>
+    <button class="btn-ghost hidden" id="signOut">Sign out</button></div>
+  </div>
+
+  <div class="card" id="authCard">
+    <h1 style="margin-top:0">Founder sign-in</h1>
+    <p class="sub">This dashboard is restricted. Sign in with the founder account — anyone else sees nothing (enforced by the database, not just this page).</p>
+    <div class="auth-row">
+      <button class="btn-accent" id="googleBtn">Continue with Google</button>
+    </div>
+    <div class="auth-row">
+      <input class="inp" id="emailInp" type="email" placeholder="bruce@waldschmidt.com" autocomplete="email">
+      <button class="btn-ghost" id="magicBtn" style="padding:11px 20px">Email me a link</button>
+    </div>
+    <div class="err" id="authErr"></div>
+    <p class="note" id="authNote"></p>
+  </div>
+
+  <div class="hidden" id="dash">
+    <h1>Since launch</h1>
+    <p class="sub" id="who">—</p>
+    <div class="tiles">
+      <div class="tile"><div class="k">Visits</div><div class="v" id="tVisits">—</div><div class="u">page loads, all time</div></div>
+      <div class="tile"><div class="k">Visits · 7d</div><div class="v" id="tVisits7">—</div><div class="u">last 7 days</div></div>
+      <div class="tile"><div class="k">Practice users</div><div class="v" id="tUsers">—</div><div class="u">signed in &amp; finished ≥1 session</div></div>
+      <div class="tile"><div class="k">Sessions</div><div class="v" id="tSess">—</div><div class="u">practice sessions, all time</div></div>
+      <div class="tile"><div class="k">Sessions · 7d</div><div class="v" id="tSess7">—</div><div class="u">last 7 days</div></div>
+      <div class="tile"><div class="k">Revenue</div><div class="v" style="color:var(--muted-2)">$0</div><div class="u">payments not wired yet</div></div>
+    </div>
+    <div class="card">
+      <div class="chart-head">
+        <h3>Visits per day — last 30 days</h3>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--good)"></span>landing</span>
+          <span><span class="sw" style="background:var(--accent)"></span>app</span>
+        </div>
+      </div>
+      <p class="sub" id="chartNote">Counting starts when the visit ping shipped — earlier traffic isn't recorded.</p>
+      <div class="chart" id="chart" role="img" aria-label="Stacked daily visits, landing vs app"></div>
+      <div class="xlab" id="xlab"></div>
+      <details><summary>View as table</summary><table id="dataTable"><thead><tr><th>Day</th><th>Landing</th><th>App</th><th>Total</th></tr></thead><tbody></tbody></table></details>
+    </div>
+    <p class="note" id="loadErr"></p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  var SUPABASE_URL = "https://fkzvfciptxvctewlcizu.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZrenZmY2lwdHh2Y3Rld2xjaXp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4MjA2OTksImV4cCI6MjEwMDM5NjY5OX0.ReQZhRVfFUK_SL4E6mBqZ8aZ-Tp33Cj8hZ1vXFp4K7A";
+  var ADMINS = ["bruce@waldschmidt.com"];
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  function $(id) { return document.getElementById(id); }
+
+  $("googleBtn").addEventListener("click", function () {
+    sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+  });
+  $("magicBtn").addEventListener("click", function () {
+    var em = $("emailInp").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { showErr("That doesn't look like an email address."); return; }
+    $("magicBtn").textContent = "Sending…";
+    sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: false } }).then(function (res) {
+      if (res.error) { showErr(res.error.message); $("magicBtn").textContent = "Email me a link"; return; }
+      $("magicBtn").textContent = "Link sent ✓";
+      $("authNote").textContent = "Check your inbox and click the link.";
+    });
+  });
+  $("signOut").addEventListener("click", function () { sb.auth.signOut().then(function () { location.reload(); }); });
+  function showErr(m) { $("authErr").textContent = m; $("authErr").style.display = "block"; }
+
+  sb.auth.getSession().then(function (r) { handle(r.data && r.data.session); });
+  sb.auth.onAuthStateChange(function (ev, session) { if (ev === "SIGNED_IN") handle(session); });
+
+  var loaded = false;
+  function handle(session) {
+    if (!session || !session.user) return;
+    var email = String(session.user.email || "").toLowerCase();
+    if (ADMINS.indexOf(email) === -1) {
+      showErr("Signed in as " + email + " — this account isn't the founder account, so there's nothing to see here.");
+      $("signOut").classList.remove("hidden");
+      return;
+    }
+    if (loaded) return;
+    loaded = true;
+    $("authCard").classList.add("hidden");
+    $("dash").classList.remove("hidden");
+    $("signOut").classList.remove("hidden");
+    $("who").textContent = "Signed in as " + email;
+    loadStats();
+  }
+
+  function loadStats() {
+    var now = Date.now();
+    var d7 = new Date(now - 7 * 864e5).toISOString();
+    var d30 = new Date(now - 30 * 864e5).toISOString();
+    var fail = function (e) { $("loadErr").textContent = "Some stats failed to load: " + ((e && e.message) || e) + " — has the v0.2 SQL block in supabase/schema.sql been run?"; };
+
+    sb.from("visits").select("*", { count: "exact", head: true }).then(function (r) {
+      if (r.error) return fail(r.error);
+      $("tVisits").textContent = fmt(r.count);
+    });
+    sb.from("visits").select("*", { count: "exact", head: true }).gte("t", d7).then(function (r) {
+      if (!r.error) $("tVisits7").textContent = fmt(r.count);
+    });
+    sb.from("sessions").select("*", { count: "exact", head: true }).then(function (r) {
+      if (r.error) return fail(r.error);
+      $("tSess").textContent = fmt(r.count);
+    });
+    sb.from("sessions").select("*", { count: "exact", head: true }).gte("t", d7).then(function (r) {
+      if (!r.error) $("tSess7").textContent = fmt(r.count);
+    });
+    sb.from("sessions").select("user_id").limit(10000).then(function (r) {
+      if (r.error) return;
+      var set = {};
+      (r.data || []).forEach(function (row) { set[row.user_id] = 1; });
+      $("tUsers").textContent = fmt(Object.keys(set).length);
+    });
+    sb.from("visits").select("t,path").gte("t", d30).limit(20000).then(function (r) {
+      if (r.error) return fail(r.error);
+      drawChart(r.data || []);
+    });
+  }
+
+  function fmt(n) { return (n === null || n === undefined) ? "—" : Number(n).toLocaleString(); }
+
+  function drawChart(rows) {
+    var days = [], byDay = {};
+    for (var i = 29; i >= 0; i--) {
+      var d = new Date(Date.now() - i * 864e5);
+      var key = d.toISOString().slice(0, 10);
+      days.push(key);
+      byDay[key] = { landing: 0, app: 0 };
+    }
+    rows.forEach(function (r) {
+      var key = String(r.t).slice(0, 10);
+      if (!byDay[key]) return;
+      if (String(r.path).indexOf("app") > -1) byDay[key].app++; else byDay[key].landing++;
+    });
+    var max = 1;
+    days.forEach(function (k) { max = Math.max(max, byDay[k].landing + byDay[k].app); });
+    var chart = $("chart"), xlab = $("xlab"), tbody = $("dataTable").querySelector("tbody");
+    chart.innerHTML = ""; xlab.innerHTML = ""; tbody.innerHTML = "";
+    days.forEach(function (k, idx) {
+      var d = byDay[k], col = document.createElement("div");
+      col.className = "col";
+      var label = k.slice(5).replace("-", "/");
+      col.innerHTML =
+        (d.app ? '<div class="seg app" style="height:' + (d.app / max) * 100 + '%"></div>' : "") +
+        (d.landing ? '<div class="seg landing" style="height:' + (d.landing / max) * 100 + '%"></div>' : "") +
+        '<div class="tip">' + label + " · landing " + d.landing + " · app " + d.app + "</div>";
+      chart.appendChild(col);
+      var lab = document.createElement("span");
+      lab.textContent = (idx % 5 === 0) ? label : "";
+      xlab.appendChild(lab);
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + k + "</td><td>" + d.landing + "</td><td>" + d.app + "</td><td>" + (d.landing + d.app) + "</td>";
+      tbody.appendChild(tr);
+    });
+  }
+})();
+</script>
+</body>
+</html>

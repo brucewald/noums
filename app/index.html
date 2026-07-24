@@ -568,7 +568,7 @@
 <div class="cal-overlay" id="calModal" role="dialog" aria-modal="true" aria-labelledby="calTitle">
   <div class="cal-box">
     <h3 id="calTitle">Calibrate your mic</h3>
-    <p class="cal-sub" id="calSub">noums listens for the difference between your voice and silence. A quick 10-second check tunes it to this mic and room — it makes filler detection much more accurate.</p>
+    <p class="cal-sub" id="calSub">noums listens for the difference between your voice and silence. A quick 15-second check tunes it to this mic, this room, and your own "um" — it makes filler detection much more accurate.</p>
     <div class="cal-sentence" id="calSentence" style="display:none">&ldquo;I practice speaking clearly, and I pause instead of filling the silence.&rdquo;</div>
     <div class="cal-meter"><div id="calMeterFill"></div></div>
     <div class="cal-progress" id="calProgress">&nbsp;</div>
@@ -727,7 +727,8 @@
   var fillerEvents = [], nextFid = 1, lastRecap = null, pauses = 0, stalls = 0;
   function activeFillerTimes() { return fillerEvents.filter(function (e) { return !e.dis; }).map(function (e) { return e.t; }); }
   var acousticQueue = [], lastTranscriptVocal = 0, vRun = null, silStart = 0, hadSpeech = false, frameN = 0;
-  var pendingRun = null, vGapFrames = 0, wasSpeaking = false, speechOnsetT = 0, onsetGap = 0;
+  var pendingRun = null, vGapFrames = 0, wasVocal = false, vocalOnsetT = 0, preQuiet = 0;
+  var lastVocalT = 0, gapVocalMs = 0, prevSpec = null, lastFrameT = 0;
   var lastInterimT = 0, prevInterim = "", lastPauseInfo = null, lastVocalEnd = 0;
   var PMARK = '<span class="pmark">◦ pause</span> ';
   var VOCAL = ["um", "uh", "er", "ah"];
@@ -785,12 +786,16 @@
 
   /* ---- audio analysis: vocal fillers + pauses ---- */
   var DEFAULT_SIL = 0.008, DEFAULT_SPEECH = 0.016;
-  var SIL_T = DEFAULT_SIL, SPEECH_T = DEFAULT_SPEECH;
+  var SIL_T = DEFAULT_SIL, SPEECH_T = DEFAULT_SPEECH, FILL_T = 0.011;
   function applyCal() {
     SIL_T = (S.cal && S.cal.sil) || DEFAULT_SIL;
     SPEECH_T = (S.cal && S.cal.speech) || DEFAULT_SPEECH;
+    /* fillers are often quieter than speech — the candidate floor sits between
+       silence and full speech so a soft "uh" isn't mistaken for a pause */
+    FILL_T = Math.max(SIL_T * 1.3, SPEECH_T * 0.45);
   }
   applyCal();
+  var DEBUG = /[?&]debug/.test(location.search);
 
   function detectPitch(buf, sr) {
     var n = buf.length;
@@ -807,29 +812,79 @@
       var v = s / denom;
       if (v > best) { best = v; bestLag = lag; }
     }
-    return (best > 0.7 && bestLag) ? sr / bestLag : 0;
+    return (best > 0.55 && bestLag) ? sr / bestLag : 0;
+  }
+
+  function med(a) {
+    var s = a.slice().sort(function (x, y) { return x - y; });
+    return s.length ? s[s.length >> 1] : 0;
+  }
+
+  /* spectral centroid + flux from byte frequency data (bins up to 4 kHz).
+     Fillers are articulatorily frozen: the mouth doesn't move, so the
+     spectrum barely changes frame to frame — words always move. */
+  function specFeatures(freq, sr) {
+    var n = freq.length, nyq = sr / 2;
+    var hi = Math.min(n - 1, Math.floor((4000 / nyq) * n));
+    var sum = 0, wsum = 0;
+    for (var i = 1; i <= hi; i++) { sum += freq[i]; wsum += freq[i] * i; }
+    var centroid = sum ? (wsum / sum) * (nyq / n) : 0;
+    var flux = 1;
+    if (prevSpec && sum) {
+      var ps = 0, d = 0;
+      for (var j = 1; j <= hi; j++) ps += prevSpec[j];
+      if (ps) {
+        for (var k = 1; k <= hi; k++) d += Math.abs(freq[k] / sum - prevSpec[k] / ps);
+        flux = d / 2;
+      }
+    }
+    if (!prevSpec || prevSpec.length !== n) prevSpec = new Float32Array(n);
+    for (var m = 0; m <= hi; m++) prevSpec[m] = freq[m];
+    return { centroid: centroid, flux: flux };
   }
 
   function evalRun(r) {
+    var frames = r.frames, nf = frames.length;
     var dur = (r.end - r.start) / 1000;
-    if (dur < 0.25 || dur > 1.5 || r.pitches.length < 6) return;
-    /* a real um/uh is its own utterance: the voiced run must start right at
-       the onset of a speech burst that itself followed real silence —
-       otherwise it's just a steady vowel inside a word */
-    if (r.lead > 0.2 || r.preGap < 0.15) return;
-    var mean = 0;
-    r.pitches.forEach(function (p) { mean += p; });
-    mean /= r.pitches.length;
-    var maxDev = 0;
-    r.pitches.forEach(function (p) { var d = Math.abs(p - mean); if (d > maxDev) maxDev = d; });
-    if (maxDev / mean > 0.1) return;
+    var voiced = frames.filter(function (f) { return f.p > 0; });
+    var why = null, mFlux = 0, mCent = 0, mPitch = 0;
+    if (dur < 0.2 || dur > 1.6) why = "duration";
+    else if (voiced.length < 4 || voiced.length / nf < 0.55) why = "voicing";
+    if (!why) {
+      /* one quiet side is enough — "and um…" and "…um I think" are both real */
+      var leftQuiet = r.lead <= 0.15 && r.preQuiet >= 0.12;
+      if (!leftQuiet && !r.rightQuiet) why = "embedded";
+    }
+    if (!why) {
+      /* fillers may drift (falling contour is typical) but don't jump around */
+      var jumps = 0;
+      for (var i = 1; i < voiced.length; i++) {
+        if (Math.abs(voiced[i].p - voiced[i - 1].p) / voiced[i - 1].p > 0.06) jumps++;
+      }
+      var drift = Math.abs(voiced[voiced.length - 1].p - voiced[0].p) / voiced[0].p;
+      if (jumps / Math.max(1, voiced.length - 1) > 0.25 || drift > 0.35) why = "pitch";
+    }
+    if (!why) {
+      mFlux = med(frames.slice(1).map(function (f) { return f.x; }));
+      mCent = med(frames.map(function (f) { return f.c; }));
+      mPitch = med(voiced.map(function (f) { return f.p; }));
+      if (mFlux > 0.5) why = "flux";
+      else if (S.cal && S.cal.um) {
+        if (mCent < S.cal.um.c * 0.5 || mCent > S.cal.um.c * 2 || mPitch < S.cal.um.p * 0.6 || mPitch > S.cal.um.p * 1.7) why = "template";
+      } else if (mCent > 2600) why = "centroid";
+    }
     var now = Date.now();
-    if (now - lastTranscriptVocal < 1500) return;
-    /* if the transcriber heard actual words during this sound, it was a word —
-       recognizers drop true fillers from the transcript */
-    if (lastInterimT >= r.start) return;
+    if (!why && now - lastTranscriptVocal < 1500) why = "transcript-dup";
+    if (!why && lastInterimT >= r.start - 200) why = "words-heard";
     var label = VOCAL.filter(function (f) { return S.fillers.indexOf(f) > -1; })[0];
-    if (!label) return;
+    if (!why && !label) why = "not-tracked";
+    if (DEBUG) console.log("[noums] run", {
+      dur: Math.round(dur * 100) / 100, frames: nf, voiced: voiced.length,
+      flux: Math.round(mFlux * 100) / 100, cent: Math.round(mCent), pitch: Math.round(mPitch),
+      lead: Math.round(r.lead * 100) / 100, preQuiet: Math.round(r.preQuiet * 100) / 100,
+      rightQuiet: !!r.rightQuiet, verdict: why || "FILLER"
+    });
+    if (why) return;
     /* the silence leading into this filler got counted as a confident pause — take it back */
     if (lastPauseInfo && Math.abs(r.start - lastPauseInfo.t) < 600) {
       pauses = Math.max(0, pauses - 1);
@@ -847,54 +902,69 @@
     renderTranscript();
   }
 
-  function analyzeFrame(buf, rms, sr, t) {
+  function analyzeFrame(buf, freq, rms, sr, t) {
     var speaking = rms >= SPEECH_T;
+    var vocal = rms >= FILL_T;
     if (speaking) {
       if (hadSpeech && silStart) {
         var gap = (t - silStart) / 1000;
-        /* silence trailing a vocal filler isn't a confident pause */
+        /* not a confident pause if it trails a filler, or if the "silence"
+           actually contained vocal sound we didn't credit */
         var afterVocal = lastVocalEnd && Math.abs(silStart - lastVocalEnd) < 600;
-        if (gap >= 0.6 && gap <= 2.5 && !afterVocal) {
+        if (gap >= 0.6 && gap <= 2.5 && !afterVocal && gapVocalMs < 120) {
           pauses++;
           lastPauseInfo = { t: t };
           markedFinalHtml += PMARK;
           renderTranscript();
         } else if (gap >= 4) { stalls++; }
       }
-      if (!wasSpeaking) {
-        speechOnsetT = t;
-        onsetGap = hadSpeech ? (silStart ? (t - silStart) / 1000 : 0) : 99;
-      }
       silStart = 0;
       hadSpeech = true;
     } else if (rms < SIL_T && !silStart) {
-      silStart = t;
+      silStart = t; gapVocalMs = 0;
     }
-    /* a candidate run only counts once trailing silence confirms it stood alone */
+    if (silStart && vocal && lastFrameT) gapVocalMs += Math.min(100, t - lastFrameT);
+
+    if (vocal && !wasVocal) {
+      vocalOnsetT = t;
+      preQuiet = lastVocalT ? (t - lastVocalT) / 1000 : 99;
+    }
+
+    /* a run that ended in quiet is judged 150ms later so we know whether
+       the quiet held; if sound resumes sooner, judge it as speech-attached */
     if (pendingRun) {
-      if (speaking) { pendingRun = null; }
-      else if (t - pendingRun.end >= 250) { evalRun(pendingRun); pendingRun = null; }
+      if (vocal) { pendingRun.rightQuiet = false; evalRun(pendingRun); pendingRun = null; }
+      else if (t - pendingRun.end >= 150) { pendingRun.rightQuiet = true; evalRun(pendingRun); pendingRun = null; }
     }
-    if (S.acoustic === false) { vRun = null; wasSpeaking = speaking; return; }
-    if (!speaking) {
-      if (vRun) { vRun.end = t; pendingRun = vRun; vRun = null; vGapFrames = 0; }
-      wasSpeaking = false;
+
+    if (S.acoustic === false) { vRun = null; wasVocal = vocal; if (vocal) lastVocalT = t; lastFrameT = t; return; }
+
+    if (!vocal) {
+      if (vRun) { vRun.end = lastVocalT || t; pendingRun = vRun; vRun = null; vGapFrames = 0; }
+      wasVocal = false; lastFrameT = t; prevSpec = null;
       return;
     }
+
     var pitch = detectPitch(buf, sr);
-    if (pitch > 0) {
-      if (!vRun) vRun = { start: t, pitches: [], lead: (t - speechOnsetT) / 1000, preGap: onsetGap };
-      vRun.pitches.push(pitch);
-      vGapFrames = 0;
-    } else if (vRun && ++vGapFrames > 4) {
-      /* voicing broke while still speaking — a consonant, so this was a word */
-      vRun = null; vGapFrames = 0;
+    var sf = specFeatures(freq, sr);
+    if (!vRun && pitch > 0) {
+      vRun = { start: t, frames: [], lead: (t - vocalOnsetT) / 1000, preQuiet: preQuiet };
     }
-    wasSpeaking = true;
+    if (vRun) {
+      vRun.frames.push({ t: t, p: pitch, c: sf.centroid, x: sf.flux });
+      if (pitch > 0) { vGapFrames = 0; }
+      else if (++vGapFrames > 4) {
+        /* voicing broke while the sound continues — judge what we have,
+           knowing the right side leads into more speech */
+        vRun.end = t; vRun.rightQuiet = false; evalRun(vRun);
+        vRun = null; vGapFrames = 0;
+      }
+    }
+    wasVocal = true; lastVocalT = t; lastFrameT = t;
   }
 
   /* waveform + analysis loop */
-  var levels = [], fbuf = null;
+  var levels = [], fbuf = null, sbuf = null;
   function drawWave() {
     var canvas = $("wave"), ctx = canvas.getContext("2d");
     var W = canvas.width, H = canvas.height;
@@ -909,7 +979,11 @@
         var rms = Math.sqrt(sum / fbuf.length);
         lvl = Math.min(1, rms * 4);
         frameN++;
-        if (frameN % 2 === 0) analyzeFrame(fbuf, rms, audioCtx ? audioCtx.sampleRate : 48000, Date.now());
+        if (frameN % 2 === 0) {
+          if (!sbuf || sbuf.length !== analyser.frequencyBinCount) sbuf = new Uint8Array(analyser.frequencyBinCount);
+          analyser.getByteFrequencyData(sbuf);
+          analyzeFrame(fbuf, sbuf, rms, audioCtx ? audioCtx.sampleRate : 48000, Date.now());
+        }
       }
       levels.push(lvl);
       var bars = 80;
@@ -938,7 +1012,8 @@
     fillerEvents = []; nextFid = 1; lastRecap = null; pauses = 0; stalls = 0; acousticQueue = []; lastTranscriptVocal = 0;
     applyCal();
     vRun = null; silStart = 0; hadSpeech = false; frameN = 0;
-    pendingRun = null; vGapFrames = 0; wasSpeaking = false; speechOnsetT = 0; onsetGap = 0;
+    pendingRun = null; vGapFrames = 0; wasVocal = false; vocalOnsetT = 0; preQuiet = 0;
+    lastVocalT = 0; gapVocalMs = 0; prevSpec = null; lastFrameT = 0;
     lastInterimT = 0; prevInterim = ""; lastPauseInfo = null; lastVocalEnd = 0;
     renderTranscript();
     recognizing = true;
@@ -1091,9 +1166,10 @@
   function calOpen() {
     calDone = false;
     $("calSentence").style.display = "none";
+    $("calSentence").innerHTML = "&ldquo;I practice speaking clearly, and I pause instead of filling the silence.&rdquo;";
     $("calMeterFill").style.width = "0%";
     $("calProgress").innerHTML = "&nbsp;";
-    $("calSub").textContent = "noums listens for the difference between your voice and silence. A quick 10-second check tunes it to this mic and room — it makes filler detection much more accurate.";
+    $("calSub").textContent = "noums listens for the difference between your voice and silence. A quick 15-second check tunes it to this mic, this room, and your own \"um\" — it makes filler detection much more accurate.";
     $("calGo").textContent = "Start calibration";
     $("calGo").style.display = "";
     $("calModal").classList.add("open");
@@ -1113,10 +1189,10 @@
       src.connect(an);
       calRunning = true;
       $("calGo").style.display = "none";
-      var buf = new Float32Array(an.fftSize);
-      var phase = "quiet", phaseStart = performance.now(), quiet = [], talk = [];
-      var QUIET_MS = 4000, TALK_MS = 6000;
-      $("calSub").textContent = "Step 1 of 2 — stay quiet. We're measuring your room's background noise.";
+      var buf = new Float32Array(an.fftSize), cfreq = null;
+      var phase = "quiet", phaseStart = performance.now(), quiet = [], talk = [], um = [];
+      var QUIET_MS = 4000, TALK_MS = 6000, UM_MS = 5000;
+      $("calSub").textContent = "Step 1 of 3 — stay quiet. We're measuring your room's background noise.";
       function tick(now) {
         if (!calRunning) return;
         an.getFloatTimeDomainData(buf);
@@ -1130,13 +1206,31 @@
           $("calProgress").textContent = "listening to the room… " + Math.ceil((QUIET_MS - el) / 1000) + "s";
           if (el >= QUIET_MS) {
             phase = "talk"; phaseStart = now;
-            $("calSub").textContent = "Step 2 of 2 — read this out loud at your normal speaking volume:";
+            $("calSub").textContent = "Step 2 of 3 — read this out loud at your normal speaking volume:";
             $("calSentence").style.display = "block";
           }
-        } else {
+        } else if (phase === "talk") {
           talk.push(rms);
           $("calProgress").textContent = "listening to your voice… " + Math.ceil((TALK_MS - el) / 1000) + "s";
-          if (el >= TALK_MS) { calFinish(quiet, talk); return; }
+          if (el >= TALK_MS) {
+            phase = "um"; phaseStart = now;
+            $("calSub").textContent = "Step 3 of 3 — teach noums your “um”. Say a few long, natural ones, like you're thinking:";
+            $("calSentence").textContent = "“ummm … uhhh … ummm”";
+          }
+        } else {
+          var p = detectPitch(buf, calCtx.sampleRate);
+          var cent = 0;
+          if (p > 0) {
+            if (!cfreq || cfreq.length !== an.frequencyBinCount) cfreq = new Uint8Array(an.frequencyBinCount);
+            an.getByteFrequencyData(cfreq);
+            var nyq = calCtx.sampleRate / 2, hi = Math.min(cfreq.length - 1, Math.floor((4000 / nyq) * cfreq.length));
+            var s2 = 0, w2 = 0;
+            for (var q = 1; q <= hi; q++) { s2 += cfreq[q]; w2 += cfreq[q] * q; }
+            cent = s2 ? (w2 / s2) * (nyq / cfreq.length) : 0;
+          }
+          um.push({ rms: rms, p: p, c: cent });
+          $("calProgress").textContent = "listening for your um… " + Math.ceil((UM_MS - el) / 1000) + "s";
+          if (el >= UM_MS) { calFinish(quiet, talk, um); return; }
         }
         calRaf = requestAnimationFrame(tick);
       }
@@ -1147,7 +1241,7 @@
       $("calGo").style.display = "";
     });
   }
-  function calFinish(quiet, talk) {
+  function calFinish(quiet, talk, um) {
     calStop();
     $("calSentence").style.display = "none";
     $("calMeterFill").style.width = "0%";
@@ -1163,11 +1257,21 @@
     var sil = Math.min(Math.max(noise * 1.8, 0.002), 0.03, voice * 0.3);
     var speech = Math.min(Math.max(sil * 2, noise * 3.5, voice * 0.35), 0.12);
     S.cal = { sil: Math.round(sil * 1e4) / 1e4, speech: Math.round(speech * 1e4) / 1e4, t: Date.now() };
+    var fillT = Math.max(sil * 1.3, speech * 0.45);
+    var umV = (um || []).filter(function (f) { return f.rms >= fillT && f.p > 0 && f.c > 0; });
+    if (umV.length >= 12) {
+      S.cal.um = {
+        p: Math.round(med(umV.map(function (f) { return f.p; }))),
+        c: Math.round(med(umV.map(function (f) { return f.c; })))
+      };
+    }
     persist();
     applyCal();
     calDone = true;
-    $("calSub").textContent = "Done — noums is tuned to this mic and room. Recalibrate from Settings any time you switch setups.";
-    $("calProgress").textContent = "noise floor " + S.cal.sil + " · speech level " + S.cal.speech;
+    $("calSub").textContent = S.cal.um
+      ? "Done — noums is tuned to this mic, this room, and your voice. Recalibrate from Settings any time you switch setups."
+      : "Done — noums is tuned to this mic and room. (We didn't catch enough of your “um” to fingerprint it — recalibrate any time to add that.)";
+    $("calProgress").textContent = "noise floor " + S.cal.sil + " · speech level " + S.cal.speech + (S.cal.um ? " · your um ≈ " + S.cal.um.p + " Hz" : "");
     $("calGo").textContent = "Start practicing";
     $("calGo").style.display = "";
     if ($("view-settings") && $("view-settings").classList.contains("on")) renderSettings();
@@ -1444,7 +1548,7 @@
     $("langSel").value = S.lang;
     $("setAcoustic").classList.toggle("on", S.acoustic !== false);
     $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
-    $("calStatus").textContent = S.cal ? "Calibrated " + new Date(S.cal.t).toLocaleDateString() : "Using default levels — calibrate for best accuracy";
+    $("calStatus").textContent = S.cal ? "Calibrated " + new Date(S.cal.t).toLocaleDateString() + (S.cal.um ? " · knows your um" : " · no um fingerprint yet — recalibrate to add it") : "Using default levels — calibrate for best accuracy";
     if (ACCOUNT) {
       $("accEmail").textContent = ACCOUNT.email;
       $("accPlan").textContent = ACCOUNT.founder ? "Pro — founder · admin, free forever" : (ACCOUNT.plan === "pro" ? "Pro (beta) — free for now" : "Free plan");
@@ -1634,6 +1738,21 @@
   var SUPABASE_URL = "https://fkzvfciptxvctewlcizu.supabase.co";
   var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZrenZmY2lwdHh2Y3Rld2xjaXp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4MjA2OTksImV4cCI6MjEwMDM5NjY5OX0.ReQZhRVfFUK_SL4E6mBqZ8aZ-Tp33Cj8hZ1vXFp4K7A";
   var sb = null, signedInHandled = false;
+
+  /* one lightweight visit ping per browser session — feeds the admin dashboard */
+  (function () {
+    try {
+      if (sessionStorage.getItem("noums.pinged./app")) return;
+      sessionStorage.setItem("noums.pinged./app", "1");
+      var acc = loadJSON("noums.account", null);
+      fetch(SUPABASE_URL + "/rest/v1/visits", {
+        method: "POST",
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ path: "/app", uid: acc && acc.uid ? acc.uid : null }),
+        keepalive: true
+      }).catch(function () {});
+    } catch (e) {}
+  })();
 
   function rowFromLocal(s) {
     return { t: new Date(s.t).toISOString(), mode: s.mode, dur: s.dur, words: s.words, fillers: s.fillers, counts: s.counts || {}, score: s.score, fpm: s.fpm, pauses: s.pauses || 0, stalls: s.stalls || 0, clean: s.clean || 0 };
