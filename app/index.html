@@ -265,6 +265,9 @@
   .btn-google { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; font-family: var(--font-body); font-weight: 600; font-size: 14.5px; background: var(--paper); border: 1.5px solid var(--line-2); border-radius: 999px; padding: 12px 20px; cursor: pointer; color: var(--ink); box-sizing: border-box; }
   .btn-google:hover { background: var(--paper-2); }
   .g-btn-wrap { display: none; justify-content: center; min-height: 44px; }
+  .vbadge { display: none; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; border-radius: 999px; padding: 3px 9px; vertical-align: middle; }
+  .vbadge.working { background: var(--paper-2); border: 1px solid var(--line); color: var(--muted); }
+  .vbadge.done { background: var(--good-wash); border: 1px solid var(--good); color: var(--good-ink); }
   .auth-err { display: none; color: var(--accent-ink); font-size: 12.5px; margin: -2px 0 10px 6px; }
   .auth-note { font-size: 12px; color: var(--muted-2); margin-top: 14px; text-align: center; }
 
@@ -350,7 +353,7 @@
 
         <div class="card live-panel">
           <h3>Live transcript</h3>
-          <div class="live-hint"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Transcribed in your browser · audio never leaves this device</div>
+          <div class="live-hint"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Audio is analysed for fillers, then discarded — never stored</div>
           <div class="transcript" id="transcript"><span class="placeholder">Your words will appear here…</span></div>
           <div class="tally" id="tally"></div>
         </div>
@@ -396,7 +399,7 @@
         </div>
         <div class="card replay-card">
           <h3>Your answer, marked up</h3>
-          <p class="p-sub">Fillers highlighted in amber — tap one if we got it wrong</p>
+          <p class="p-sub">Fillers highlighted in amber — tap one if we got it wrong <span class="vbadge" id="verifyBadge" style="display:none"></span></p>
           <div class="transcript" id="finalTranscript" style="flex:1"></div>
           <div class="tip" id="tipBox" style="display:none">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12c1 1 1 2 1 3h6c0-1 0-2 1-3a7 7 0 0 0-4-12Z"/></svg>
@@ -481,7 +484,11 @@
       </div>
       <div class="card set-card">
         <h3>Speech recognition</h3>
-        <p class="p-sub">Transcription happens in your browser. Your voice never leaves this device.</p>
+        <p class="p-sub">Live transcription is handled by your browser's speech engine. Recordings are never stored — audio is analysed and discarded.</p>
+        <div class="set-row">
+          <div class="lbl"><div class="t1">Accurate filler detection</div><div class="t2">Sends the session recording for an exact "um"/"uh" count. Off = the on-device estimate only, which misses fillers.</div></div>
+          <span class="toggle" id="setCloud"><span class="switch" aria-hidden="true"></span><span id="setCloudLabel">On</span></span>
+        </div>
         <div class="set-row">
           <div class="lbl"><div class="t1">Language</div><div class="t2">Used for transcription</div></div>
           <select class="sel" id="langSel">
@@ -549,7 +556,7 @@
   <div class="onb-card" style="max-width:430px">
     <div class="onb-brand"><span class="rec" aria-hidden="true"></span>noums</div>
     <h2>Create your account</h2>
-    <p class="lede">Free for daily practice. Your voice stays on your device — the account keeps your progress.</p>
+    <p class="lede">Free for daily practice. Recordings are never stored — the account keeps your progress.</p>
     <div id="planFlag" class="pro-pill" style="display:none;margin-bottom:16px;padding:6px 12px;font-size:11px">Pro selected — free while noums is in beta</div>
     <input class="inp" id="authEmail" type="email" placeholder="you@example.com" autocomplete="email">
     <div class="auth-err" id="authErr">That doesn't look like an email — try again.</div>
@@ -588,7 +595,7 @@
       <p class="lede">noums asks you real questions, listens while you answer, and shows you every filler word you lean on — so you can swap them for confident pauses.</p>
       <div class="onb-note">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-        <span>Everything is transcribed in your browser. Your voice never leaves this device.</span>
+        <span>Your session audio is analysed for filler words, then discarded. Recordings are never stored.</span>
       </div>
       <div class="onb-foot">
         <div class="dots"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
@@ -729,6 +736,7 @@
   var fillerEvents = [], nextFid = 1, lastRecap = null, pauses = 0, stalls = 0;
   function activeFillerTimes() { return fillerEvents.filter(function (e) { return !e.dis; }).map(function (e) { return e.t; }); }
   var acousticQueue = [], lastTranscriptVocal = 0, vRun = null, silStart = 0, hadSpeech = false, frameN = 0;
+  var mediaRec = null, audioChunks = [], recMime = "";
   var pendingRun = null, vGapFrames = 0, wasVocal = false, vocalOnsetT = 0, preQuiet = 0;
   var lastVocalT = 0, gapVocalMs = 0, prevSpec = null, lastFrameT = 0;
   var lastInterimT = 0, prevInterim = "", lastPauseInfo = null, lastVocalEnd = 0;
@@ -1008,6 +1016,32 @@
     frame();
   }
 
+  /* ---- session audio capture (for the post-session filler check) ---- */
+  function startRecorder(stream) {
+    mediaRec = null; audioChunks = [];
+    if (!window.MediaRecorder) return;
+    var mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].filter(function (m) {
+      try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; }
+    })[0];
+    if (!mime) return;
+    try {
+      recMime = mime;
+      mediaRec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
+      mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) audioChunks.push(e.data); };
+      mediaRec.start(2000);
+    } catch (e) { mediaRec = null; }
+  }
+  /* must be called before the mic tracks are stopped, so the tail flushes */
+  function stopRecorder() {
+    return new Promise(function (resolve) {
+      var done = function () { resolve(audioChunks.length ? new Blob(audioChunks, { type: recMime }) : null); };
+      if (!mediaRec || mediaRec.state === "inactive") { done(); return; }
+      mediaRec.onstop = done;
+      setTimeout(done, 3000);
+      try { mediaRec.stop(); } catch (e) { done(); }
+    });
+  }
+
   function startEngine() {
     if (!SR) { warn.classList.add("on"); return; }
     finalText = ""; interimText = ""; markedFinalHtml = ""; counts = {}; totalFillers = 0; levels = [];
@@ -1039,6 +1073,7 @@
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       src.connect(analyser);
+      startRecorder(stream);
       drawWave();
     }).catch(function () { drawWave(); });
 
@@ -1074,6 +1109,7 @@
 
   function stopEngine() {
     recognizing = false;
+    if (mediaRec && mediaRec.state !== "inactive") { try { mediaRec.stop(); } catch (e) {} }
     if (timerIv) { clearInterval(timerIv); timerIv = null; }
     if (recog) { try { recog.stop(); } catch (e) {} recog = null; }
     if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
@@ -1286,6 +1322,7 @@
   function endSession() {
     if (!recognizing) return;
     var elapsed = Math.max(1, (Date.now() - startTime) / 1000);
+    var audioP = stopRecorder();
     stopEngine();
     resetLiveUI();
 
@@ -1349,6 +1386,87 @@
       var n = 0;
       var iv = setInterval(function () { n += 2; if (n >= score) { n = score; clearInterval(iv); } num.textContent = n; }, 22);
     }, 150);
+
+    verifyWithModel(audioP, elapsed);
+  }
+
+  /* ---- post-session filler check ----
+     The live count comes from the browser's recognizer plus our acoustic
+     guesswork, neither of which reliably sees "um"/"uh". If the user is
+     signed in and the transcribe function is deployed, the recording gets a
+     second pass from a model with real filler detection and the recap is
+     rebuilt from that. Any failure leaves the local estimate in place. */
+  function setVerifyState(state) {
+    var b = $("verifyBadge");
+    if (!b) return;
+    b.className = "vbadge " + state;
+    b.textContent = state === "working" ? "checking…" : (state === "done" ? "✓ verified" : "");
+    b.style.display = state === "off" ? "none" : "inline-flex";
+  }
+  function normWord(w) { return String(w).toLowerCase().replace(/[^a-z']/g, ""); }
+
+  function applyModelResult(data, elapsed) {
+    var act = activeFillers(), w = data.words;
+    counts = {}; totalFillers = 0; fillerEvents = []; nextFid = 1;
+    var html = "", i = 0;
+    while (i < w.length) {
+      var matched = null, span = 0;
+      for (var k = 0; k < act.length; k++) {
+        var parts = act[k].split(" ");
+        if (parts.length <= span || i + parts.length > w.length) continue;
+        var ok = true;
+        for (var p = 0; p < parts.length; p++) {
+          if (normWord(w[i + p].w) !== parts[p]) { ok = false; break; }
+        }
+        if (ok) { matched = act[k]; span = parts.length; }
+      }
+      if (matched) {
+        counts[matched] = (counts[matched] || 0) + 1;
+        totalFillers++;
+        var fid = nextFid++;
+        fillerEvents.push({ id: fid, f: matched, t: startTime + Math.round((w[i].start || 0) * 1000), dis: false });
+        var txt = w.slice(i, i + span).map(function (x) { return x.w; }).join(" ");
+        html += '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + escapeHtml(txt) + "</span> ";
+        i += span;
+      } else {
+        html += escapeHtml(w[i].w) + " ";
+        i++;
+      }
+    }
+    markedFinalHtml = html;
+    finalText = data.transcript || finalText;
+
+    var words = finalText.trim() ? finalText.trim().split(/\s+/).length : 0;
+    lastRecap.words = words;
+    $("mWords").textContent = words + " words";
+    $("mWpm").textContent = words ? Math.round(words / (elapsed / 60)) : "—";
+    if (lastRecap.sess) lastRecap.sess.words = words;
+    refreshRecapAfterEdit();
+  }
+
+  function verifyWithModel(audioP, elapsed) {
+    setVerifyState("off");
+    if (S.cloudCheck === false || !sb || !signedInHandled) return;
+    audioP.then(function (blob) {
+      if (!blob || blob.size < 2000) return;
+      setVerifyState("working");
+      return sb.auth.getSession().then(function (r) {
+        var tok = r && r.data && r.data.session && r.data.session.access_token;
+        if (!tok) throw new Error("no session");
+        return fetch(SUPABASE_URL + "/functions/v1/transcribe?lang=" + encodeURIComponent((S.lang || "en").slice(0, 2)), {
+          method: "POST",
+          headers: { Authorization: "Bearer " + tok, "Content-Type": blob.type || "audio/webm" },
+          body: blob
+        });
+      }).then(function (res) {
+        if (!res.ok) throw new Error("http " + res.status);
+        return res.json();
+      }).then(function (data) {
+        if (!data || !data.words || !data.words.length) throw new Error("empty");
+        applyModelResult(data, elapsed);
+        setVerifyState("done");
+      });
+    }).catch(function () { setVerifyState("off"); });
   }
 
   var TIPS = {
@@ -1551,6 +1669,8 @@
     $("setAcoustic").classList.toggle("on", S.acoustic !== false);
     $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
     $("calStatus").textContent = S.cal ? "Calibrated " + new Date(S.cal.t).toLocaleDateString() + (S.cal.um ? " · knows your um" : " · no um fingerprint yet — recalibrate to add it") : "Using default levels — calibrate for best accuracy";
+    $("setCloud").classList.toggle("on", S.cloudCheck !== false);
+    $("setCloudLabel").textContent = S.cloudCheck !== false ? "On" : "Off";
     if (ACCOUNT) {
       $("accEmail").textContent = ACCOUNT.email;
       $("accPlan").textContent = ACCOUNT.founder ? "Pro — founder · admin, free forever" : (ACCOUNT.plan === "pro" ? "Pro (beta) — free for now" : "Free plan");
@@ -1565,6 +1685,11 @@
     S.acoustic = !(S.acoustic !== false); persist();
     $("setAcoustic").classList.toggle("on", S.acoustic !== false);
     $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
+  });
+  $("setCloud").addEventListener("click", function () {
+    S.cloudCheck = !(S.cloudCheck !== false); persist();
+    $("setCloud").classList.toggle("on", S.cloudCheck !== false);
+    $("setCloudLabel").textContent = S.cloudCheck !== false ? "On" : "Off";
   });
   $("setCamDefault").addEventListener("click", function () {
     S.camDefault = !S.camDefault; persist();

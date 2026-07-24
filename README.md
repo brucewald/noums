@@ -6,9 +6,16 @@ noums is a speech-coaching web app: it asks you real interview and free-talk
 questions, listens while you answer, and shows you every filler word ("um",
 "uh", "like", "so"…) you lean on — so you can swap them for confident pauses.
 
-Everything runs in the browser. Speech is transcribed on-device via the Web
-Speech API; audio never leaves the user's machine, and session history lives
-in `localStorage`.
+The front end is a zero-build static site and session history lives in
+`localStorage`, syncing to Supabase when signed in.
+
+A note on audio, since it's easy to get wrong: live transcription uses the Web
+Speech API, which in Chrome sends audio to Google's servers — it is not
+on-device unless a site explicitly opts in. For the recap, the session
+recording is posted to the `transcribe` edge function, which forwards it to
+Deepgram with filler-word detection enabled and discards it. Recordings are
+never stored. Users can turn the second pass off in Settings, which falls back
+to the on-device acoustic estimate.
 
 ## Structure
 
