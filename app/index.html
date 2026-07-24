@@ -718,7 +718,7 @@
   var navBtns = document.querySelectorAll(".nav button");
   var viewNames = ["practice", "progress", "recap", "settings"];
   function show(view) {
-    if (recognizing && view !== "practice" && view !== "recap") { stopEngine(); resetLiveUI(); }
+    if (recognizing && view !== "practice" && view !== "recap") { stopRecorder(); stopEngine(); resetLiveUI(); }
     viewNames.forEach(function (v) { var el = $("view-" + v); if (el) el.classList.toggle("on", v === view); });
     var navView = view === "recap" ? "practice" : view;
     navBtns.forEach(function (b) { b.classList.toggle("active", b.dataset.view === navView); });
@@ -1028,16 +1028,30 @@
       recMime = mime;
       mediaRec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
       mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) audioChunks.push(e.data); };
-      mediaRec.start(2000);
+      /* No timeslice: chunks after the first carry no WebM header, and the
+         concatenation decodes as a few seconds of audio. One blob at stop is
+         a properly finalised file. */
+      mediaRec.start();
     } catch (e) { mediaRec = null; }
   }
-  /* must be called before the mic tracks are stopped, so the tail flushes */
+  function releaseMic() {
+    if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
+  }
+  /* Holds the mic open until the recorder has flushed — killing the track
+     first truncates the recording. */
   function stopRecorder() {
     return new Promise(function (resolve) {
-      var done = function () { resolve(audioChunks.length ? new Blob(audioChunks, { type: recMime }) : null); };
+      var settled = false;
+      var done = function () {
+        if (settled) return;
+        settled = true;
+        var blob = audioChunks.length ? new Blob(audioChunks, { type: recMime }) : null;
+        releaseMic();
+        resolve(blob);
+      };
       if (!mediaRec || mediaRec.state === "inactive") { done(); return; }
       mediaRec.onstop = done;
-      setTimeout(done, 3000);
+      setTimeout(done, 6000);
       try { mediaRec.stop(); } catch (e) { done(); }
     });
   }
@@ -1100,7 +1114,7 @@
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         warn.classList.add("on");
         warn.innerHTML = "<b>Mic blocked:</b> allow microphone access for this page, or download the HTML and open it directly in Chrome/Edge — everything runs locally.";
-        stopEngine(); resetLiveUI();
+        stopRecorder(); stopEngine(); resetLiveUI();
       }
     };
     recog.onend = function () { if (recognizing) { try { recog.start(); } catch (err) {} } };
@@ -1112,7 +1126,7 @@
     if (mediaRec && mediaRec.state !== "inactive") { try { mediaRec.stop(); } catch (e) {} }
     if (timerIv) { clearInterval(timerIv); timerIv = null; }
     if (recog) { try { recog.stop(); } catch (e) {} recog = null; }
-    if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
+    /* the mic is released by stopRecorder once the recording has flushed */
     if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; analyser = null; }
   }
   function resetLiveUI() {
@@ -1448,6 +1462,7 @@
     setVerifyState("off");
     if (S.cloudCheck === false || !sb || !signedInHandled) return;
     audioP.then(function (blob) {
+      if (DEBUG) console.log("[noums] recording:", blob ? Math.round(blob.size / 1024) + " KB for " + Math.round(elapsed) + "s" : "none");
       if (!blob || blob.size < 2000) return;
       setVerifyState("working");
       return sb.auth.getSession().then(function (r) {
@@ -1469,6 +1484,9 @@
           var seen = {};
           data.words.forEach(function (x) { var n = normWord(x.w); seen[n] = (seen[n] || 0) + 1; });
           console.log("[noums] word frequencies:", JSON.stringify(seen));
+          var last = data.words[data.words.length - 1];
+          console.log("[noums] coverage: " + data.words.length + " words, audio transcribed to "
+            + Math.round(last.end) + "s of " + Math.round(elapsed) + "s");
         }
         applyModelResult(data, elapsed);
         setVerifyState("done");
