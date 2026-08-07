@@ -92,8 +92,11 @@ would require a purchase approach. Available as of 2026-07-21:
 - [x] Deployed — https://brucewald.github.io/noums/ (GitHub Pages, auto-deploys on push to main)
 - [x] Confident-pause and stall tracking
 - [x] Accounts + sync — Supabase auth (magic link + Google) and per-user session history
-- [x] Reliable filler detection — Deepgram second pass (needs `DEEPGRAM_API_KEY` set to go live)
-- [ ] Support Safari and iOS — recording is currently blocked without the Web Speech API
+- [x] Reliable filler detection — Deepgram second pass, live
+- [x] Safari and iOS — Safari has had `webkitSpeechRecognition` since 14.5,
+      and the recorder already negotiates `audio/mp4`, so nothing was ever
+      blocked. Watch the live transcript on iOS: it tends to stop after each
+      utterance despite `continuous`, which the Deepgram recap then hides.
 - [ ] Presentation mode (rehearse against your own talking points)
 - [ ] Custom SMTP — the built-in mailer caps magic links at a few per hour
 - [ ] Pressure mode (Pro) — see `design/mockup.html`
