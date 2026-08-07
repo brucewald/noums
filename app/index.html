@@ -795,17 +795,65 @@
   renderTally();
 
   /* ---- audio analysis: vocal fillers + pauses ---- */
+  /* A confident pause is a deliberate beat, not a breath. Ordinary speech is
+     full of 0.5-1s junctures — between clauses, before a noun you're reaching
+     for — and counting those made the number climb constantly and mean
+     nothing. Past STALL_MIN silence stops reading as poise and starts reading
+     as lost. Nothing falls between the two: every gap is one or the other. */
+  var PAUSE_MIN = 1.2, STALL_MIN = 4;
   var DEFAULT_SIL = 0.008, DEFAULT_SPEECH = 0.016;
   var SIL_T = DEFAULT_SIL, SPEECH_T = DEFAULT_SPEECH, FILL_T = 0.011;
+  /* Bump whenever the capture path changes: thresholds are levels measured off
+     a specific signal chain, and turning off noise suppression and auto gain
+     moved every one of them. A saved calibration from the old chain describes
+     a microphone that no longer exists, so drop it and use defaults until the
+     user recalibrates. */
+  var CAL_V = 2;
+  function calOK() { return S.cal && S.cal.v === CAL_V; }
   function applyCal() {
-    SIL_T = (S.cal && S.cal.sil) || DEFAULT_SIL;
-    SPEECH_T = (S.cal && S.cal.speech) || DEFAULT_SPEECH;
+    SIL_T = (calOK() && S.cal.sil) || DEFAULT_SIL;
+    SPEECH_T = (calOK() && S.cal.speech) || DEFAULT_SPEECH;
     /* fillers are often quieter than speech — the candidate floor sits between
        silence and full speech so a soft "uh" isn't mistaken for a pause */
     FILL_T = Math.max(SIL_T * 1.3, SPEECH_T * 0.45);
   }
   applyCal();
   var DEBUG = /[?&]debug/.test(location.search);
+  /* Every count in the app keys off two absolute RMS thresholds, so if the
+     input level and the thresholds disagree the whole session reads as one
+     long silence — no speech, no fillers, no pauses. That failure looks
+     identical to "the detector found nothing", so log the levels we actually
+     saw next to the levels we were testing against. */
+  var rmsLog = [];
+  function logLevels(elapsed) {
+    if (!DEBUG || !rmsLog.length) return;
+    var s = rmsLog.slice().sort(function (a, b) { return a - b; });
+    function pc(p) { return Math.round(s[Math.min(s.length - 1, Math.floor(s.length * p))] * 1e4) / 1e4; }
+    var above = rmsLog.filter(function (r) { return r >= SPEECH_T; }).length;
+    console.log("[noums] levels over " + Math.round(elapsed) + "s: p10 " + pc(0.1)
+      + " · median " + pc(0.5) + " · p90 " + pc(0.9) + " · peak " + pc(1)
+      + "  |  thresholds sil " + SIL_T + " / speech " + SPEECH_T + " / filler "
+      + (Math.round(FILL_T * 1e4) / 1e4)
+      + "  |  " + Math.round(above / rmsLog.length * 100) + "% of frames counted as speech"
+      + (above / rmsLog.length < 0.05 ? "  <-- input is below the speech threshold; nothing can be detected" : ""));
+  }
+
+  /* Chrome's default mic pipeline is tuned for phone calls, and it treats
+     "um"/"uh" the way it treats a fan: low-energy, steady, not speech-shaped,
+     so noise suppression attenuates them before anything downstream — our
+     analyser, the recorder, Deepgram — ever hears them. Auto gain is the
+     other half: it renormalises level continuously, so thresholds measured
+     during calibration don't hold during the session, which is why three
+     rounds of tuning the acoustic detector never stuck. Chrome ties auto gain
+     to the echoCancellation flag, so all three have to go off together.
+     Some hardware/OS suppression can't be disabled this way — logMicSettings
+     reports what actually took effect. */
+  var MIC_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  function logMicSettings(stream, where) {
+    if (!DEBUG) return;
+    var tr = stream.getAudioTracks && stream.getAudioTracks()[0];
+    if (tr && tr.getSettings) console.log("[noums] mic (" + where + "):", JSON.stringify(tr.getSettings()));
+  }
 
   function detectPitch(buf, sr) {
     var n = buf.length;
@@ -879,7 +927,7 @@
       mCent = med(frames.map(function (f) { return f.c; }));
       mPitch = med(voiced.map(function (f) { return f.p; }));
       if (mFlux > 0.5) why = "flux";
-      else if (S.cal && S.cal.um) {
+      else if (calOK() && S.cal.um) {
         if (mCent < S.cal.um.c * 0.5 || mCent > S.cal.um.c * 2 || mPitch < S.cal.um.p * 0.6 || mPitch > S.cal.um.p * 1.7) why = "template";
       } else if (mCent > 2600) why = "centroid";
     }
@@ -913,6 +961,7 @@
   }
 
   function analyzeFrame(buf, freq, rms, sr, t) {
+    if (DEBUG) rmsLog.push(rms);
     var speaking = rms >= SPEECH_T;
     var vocal = rms >= FILL_T;
     if (speaking) {
@@ -921,12 +970,12 @@
         /* not a confident pause if it trails a filler, or if the "silence"
            actually contained vocal sound we didn't credit */
         var afterVocal = lastVocalEnd && Math.abs(silStart - lastVocalEnd) < 600;
-        if (gap >= 0.6 && gap <= 2.5 && !afterVocal && gapVocalMs < 120) {
+        if (gap >= PAUSE_MIN && gap < STALL_MIN && !afterVocal && gapVocalMs < 120) {
           pauses++;
           lastPauseInfo = { t: t };
           markedFinalHtml += PMARK;
           renderTranscript();
-        } else if (gap >= 4) { stalls++; }
+        } else if (gap >= STALL_MIN) { stalls++; }
       }
       silStart = 0;
       hadSpeech = true;
@@ -1026,7 +1075,10 @@
     if (!mime) return;
     try {
       recMime = mime;
-      mediaRec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
+      /* 32k Opus was audibly fine but sits at the bottom edge for a model
+         doing phoneme-level work; fillers are the first thing to smear. A
+         5-minute session is ~2MB at 64k, well under the function's 12MB cap. */
+      mediaRec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 64000 });
       mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) audioChunks.push(e.data); };
       /* No timeslice: chunks after the first carry no WebM header, and the
          concatenation decodes as a few seconds of audio. One blob at stop is
@@ -1061,7 +1113,7 @@
     finalText = ""; interimText = ""; markedFinalHtml = ""; counts = {}; totalFillers = 0; levels = [];
     fillerEvents = []; nextFid = 1; lastRecap = null; pauses = 0; stalls = 0; acousticQueue = []; lastTranscriptVocal = 0;
     applyCal();
-    vRun = null; silStart = 0; hadSpeech = false; frameN = 0;
+    vRun = null; silStart = 0; hadSpeech = false; frameN = 0; rmsLog = [];
     pendingRun = null; vGapFrames = 0; wasVocal = false; vocalOnsetT = 0; preQuiet = 0;
     lastVocalT = 0; gapVocalMs = 0; prevSpec = null; lastFrameT = 0;
     lastInterimT = 0; prevInterim = ""; lastPauseInfo = null; lastVocalEnd = 0;
@@ -1080,8 +1132,9 @@
       if (S.sessLen && s >= S.sessLen * 60) endSession();
     }, 500);
 
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+    navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO }).then(function (stream) {
       micStream = stream;
+      logMicSettings(stream, "session");
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       var src = audioCtx.createMediaStreamSource(stream);
       analyser = audioCtx.createAnalyser();
@@ -1141,8 +1194,10 @@
 
   $("recBtn").addEventListener("click", function () {
     if (recognizing) { endSession(); return; }
-    if (!S.cal && !loadJSON("noums.calPrompted", false)) {
-      saveJSON("noums.calPrompted", true);
+    /* the flag stores which capture version we last asked about, so a bumped
+       CAL_V re-prompts people who calibrated against the old signal chain */
+    if (!calOK() && loadJSON("noums.calPrompted", 0) !== CAL_V) {
+      saveJSON("noums.calPrompted", CAL_V);
       calOpen();
       return;
     }
@@ -1166,6 +1221,8 @@
     if (!lastRecap) return;
     var st = computeStats(lastRecap.elapsed, lastRecap.words, lastRecap.endT);
     $("mFill").textContent = totalFillers;
+    $("mPause").textContent = pauses;
+    $("mStall").textContent = stalls;
     $("mFpm").textContent = (Math.round(st.fpm * 10) / 10) + " / min";
     $("mClean").textContent = lastRecap.words ? (st.clean >= 60 ? fmtDur(st.clean) : st.clean + "s") : "—";
     renderBars($("barsWrap"), counts, true);
@@ -1179,8 +1236,9 @@
     if (sess) {
       sess.fillers = totalFillers; sess.counts = counts; sess.score = st.score;
       sess.fpm = Math.round(st.fpm * 10) / 10; sess.clean = st.clean;
+      sess.pauses = pauses; sess.stalls = stalls;
       persistSessions();
-      if (sb && signedInHandled) sb.from("sessions").update({ fillers: sess.fillers, counts: sess.counts, score: sess.score, fpm: sess.fpm, clean: sess.clean }).eq("t", new Date(sess.t).toISOString()).then(function () {});
+      if (sb && signedInHandled) sb.from("sessions").update({ fillers: sess.fillers, counts: sess.counts, score: sess.score, fpm: sess.fpm, clean: sess.clean, pauses: sess.pauses, stalls: sess.stalls }).eq("t", new Date(sess.t).toISOString()).then(function () {});
     }
   }
 
@@ -1232,8 +1290,12 @@
   }
   function runCalibration() {
     if (calRunning) return;
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+    /* must match the session capture exactly — calibrating against a
+       processed signal and then measuring a raw one is worse than no
+       calibration at all */
+    navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO }).then(function (stream) {
       calStream = stream;
+      logMicSettings(stream, "calibration");
       calCtx = new (window.AudioContext || window.webkitAudioContext)();
       var src = calCtx.createMediaStreamSource(stream);
       var an = calCtx.createAnalyser();
@@ -1308,7 +1370,7 @@
     }
     var sil = Math.min(Math.max(noise * 1.8, 0.002), 0.03, voice * 0.3);
     var speech = Math.min(Math.max(sil * 2, noise * 3.5, voice * 0.35), 0.12);
-    S.cal = { sil: Math.round(sil * 1e4) / 1e4, speech: Math.round(speech * 1e4) / 1e4, t: Date.now() };
+    S.cal = { v: CAL_V, sil: Math.round(sil * 1e4) / 1e4, speech: Math.round(speech * 1e4) / 1e4, t: Date.now() };
     var fillT = Math.max(sil * 1.3, speech * 0.45);
     var umV = (um || []).filter(function (f) { return f.rms >= fillT && f.p > 0 && f.c > 0; });
     if (umV.length >= 12) {
@@ -1336,6 +1398,7 @@
   function endSession() {
     if (!recognizing) return;
     var elapsed = Math.max(1, (Date.now() - startTime) / 1000);
+    logLevels(elapsed);
     var audioP = stopRecorder();
     stopEngine();
     resetLiveUI();
@@ -1422,6 +1485,11 @@
   function applyModelResult(data, elapsed) {
     var act = activeFillers(), w = data.words;
     counts = {}; totalFillers = 0; fillerEvents = []; nextFid = 1;
+    /* Word timings beat the RMS thresholds we used live: they mark real word
+       boundaries regardless of mic level or room noise, so pauses get
+       recomputed here rather than carried over. This also keeps the count and
+       the ◦ markers in the transcript agreeing — they're built together. */
+    pauses = 0; stalls = 0;
     var html = "", i = 0;
     while (i < w.length) {
       var matched = null, span = 0;
@@ -1433,6 +1501,12 @@
           if (normWord(w[i + p].w) !== parts[p]) { ok = false; break; }
         }
         if (ok) { matched = act[k]; span = parts.length; }
+      }
+      if (i > 0) {
+        /* silence leading into a filler is the wind-up to the "um", not poise */
+        var gap = (w[i].start || 0) - (w[i - 1].end || 0);
+        if (gap >= STALL_MIN) { stalls++; }
+        else if (gap >= PAUSE_MIN && !matched) { pauses++; html += PMARK; }
       }
       if (matched) {
         counts[matched] = (counts[matched] || 0) + 1;
@@ -1487,6 +1561,18 @@
           var last = data.words[data.words.length - 1];
           console.log("[noums] coverage: " + data.words.length + " words, audio transcribed to "
             + Math.round(last.end) + "s of " + Math.round(elapsed) + "s");
+        }
+        /* The second pass replaces the recap wholesale, so a partial
+           transcript doesn't correct the session — it erases the part of it
+           the model never heard. A recording that stops early (or an upload
+           that loses its tail) comes back as confident, well-formed words
+           covering the first minute of five, and every filler and pause after
+           that point silently disappears. Only hand over when the model
+           actually heard the session through; otherwise keep the live
+           estimate, which at least covers all of it. */
+        var lastEnd = data.words[data.words.length - 1].end || 0;
+        if (elapsed > 5 && lastEnd < elapsed * 0.75) {
+          throw new Error("partial coverage: " + Math.round(lastEnd) + "s of " + Math.round(elapsed) + "s");
         }
         applyModelResult(data, elapsed);
         setVerifyState("done");
@@ -1696,7 +1782,9 @@
     $("langSel").value = S.lang;
     $("setAcoustic").classList.toggle("on", S.acoustic !== false);
     $("setAcousticLabel").textContent = S.acoustic !== false ? "On" : "Off";
-    $("calStatus").textContent = S.cal ? "Calibrated " + new Date(S.cal.t).toLocaleDateString() + (S.cal.um ? " · knows your um" : " · no um fingerprint yet — recalibrate to add it") : "Using default levels — calibrate for best accuracy";
+    $("calStatus").textContent = calOK()
+      ? "Calibrated " + new Date(S.cal.t).toLocaleDateString() + (S.cal.um ? " · knows your um" : " · no um fingerprint yet — recalibrate to add it")
+      : (S.cal ? "Out of date — the mic setup changed, recalibrate for best accuracy" : "Using default levels — calibrate for best accuracy");
     $("setCloud").classList.toggle("on", S.cloudCheck !== false);
     $("setCloudLabel").textContent = S.cloudCheck !== false ? "On" : "Off";
     if (ACCOUNT) {
@@ -1773,7 +1861,7 @@
     });
   });
   $("micTestBtn").addEventListener("click", function () {
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+    navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO }).then(function (stream) {
       onbMicStream = stream;
       onbCtx = new (window.AudioContext || window.webkitAudioContext)();
       var src = onbCtx.createMediaStreamSource(stream);
