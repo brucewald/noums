@@ -1,0 +1,29 @@
+# Free-tier Supabase projects pause after ~7 days without database activity.
+# This pings the database every 3 days so that never happens. If it fails,
+# GitHub emails the repo owner — which usually means the project is already
+# paused and needs restoring from the Supabase dashboard.
+#
+# Note: GitHub disables scheduled workflows after 60 days with no commits.
+# It emails a warning first; one click re-enables it.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "0 15 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ping database
+        run: |
+          # Read the URL and public anon key from the app, so they live in one place.
+          URL=$(grep -oE 'SUPABASE_URL *= *"[^"]+"' app/index.html | head -1 | cut -d'"' -f2)
+          KEY=$(grep -oE 'SUPABASE_ANON_KEY *= *"[^"]+"' app/index.html | head -1 | cut -d'"' -f2)
+          test -n "$URL" && test -n "$KEY" || { echo "Could not find Supabase URL/key in app/index.html"; exit 1; }
+          curl -sS --fail-with-body --retry 3 --retry-delay 10 -X POST "$URL/rest/v1/rpc/keepalive" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}'
+          echo
+          echo "Database is awake."
