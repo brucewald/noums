@@ -127,3 +127,16 @@ insert into public.profiles (uid, email, created_at)
 select id, email, created_at from auth.users
 on conflict (uid) do nothing;
 
+
+-- ---------------------------------------------------------------------------
+-- Keep-alive. Free-tier projects pause after about a week without database
+-- activity, which silently breaks sign-in, sync and the Deepgram recap. The
+-- GitHub workflow in .github/workflows/keepalive.yml calls this every few
+-- days. It reads nothing, so it is safe to expose to anon.
+create or replace function public.keepalive()
+returns timestamptz
+language sql
+stable
+as $$ select now() $$;
+
+grant execute on function public.keepalive() to anon;
