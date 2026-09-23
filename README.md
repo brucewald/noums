@@ -97,8 +97,15 @@ would require a purchase approach. Available as of 2026-07-21:
       and the recorder already negotiates `audio/mp4`, so nothing was ever
       blocked. Watch the live transcript on iOS: it tends to stop after each
       utterance despite `continuous`, which the Deepgram recap then hides.
-- [ ] Presentation mode (rehearse against your own talking points)
-- [ ] Custom SMTP — the built-in mailer caps magic links at a few per hour
+- [x] Presentation mode — rehearse against your own talking points; step
+      through them with the button, arrow keys or a clicker, and the recap
+      shows which points the transcript covered (keyword match) and time
+      per point. Coverage is shown but not synced.
+- [x] Keep-alive — `.github/workflows/keepalive.yml` pings the database
+      every 3 days so the free project doesn't pause
+- [ ] Custom SMTP — the built-in mailer only delivers to the Supabase
+      org's own members (so email sign-in fails for everyone else) and caps
+      at a few per hour. Plan: buy a domain, send through Resend.
 - [ ] Pressure mode (Pro) — see `design/mockup.html`
 - [ ] Payments for Pro
 
@@ -147,5 +154,13 @@ The `transcribe` edge function needs `DEEPGRAM_API_KEY` set as a secret.
 Until it is, the function returns 503 and the app silently falls back to
 its on-device estimate — so this failure is invisible; check it directly.
 
-Note: the free tier's built-in email service is rate-limited (a few magic
-links per hour) — fine for testing; configure custom SMTP before real users.
+Note: the built-in email service only sends to members of the Supabase
+organization and is rate-limited to a few per hour — so until custom SMTP is
+configured, email sign-in effectively works only for the founder. Google
+sign-in is unaffected.
+
+Free-tier projects pause after about a week without database activity. The
+`keepalive` workflow prevents that by calling the `keepalive()` function in
+`schema.sql` every 3 days (that function must exist in the live database).
+If the workflow fails, the project has probably paused already: restore it
+from the Supabase dashboard.

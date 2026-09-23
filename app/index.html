@@ -250,6 +250,24 @@
   .dot.on { background: var(--accent); width: 20px; border-radius: 999px; }
   .skip { font-size: 13px; color: var(--muted); background: none; border: none; cursor: pointer; font-family: var(--font-body); }
   .skip:hover { color: var(--ink); }
+
+  /* presentation mode */
+  .pres-next { font-size: 13px; color: var(--muted); margin-top: 8px; display: none; }
+  .pres-next.on { display: block; }
+  .pres-next kbd { font-family: var(--font-mono); font-size: 11px; background: var(--paper-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+  .pres-ta { width: 100%; min-height: 160px; font-family: var(--font-body); font-size: 14.5px; line-height: 1.5; padding: 12px 16px; border-radius: 14px; border: 1.5px solid var(--line-2); background: var(--paper-2); color: var(--ink); box-sizing: border-box; resize: vertical; margin-top: 14px; }
+  .pres-ta:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .pres-box .inp { margin: 14px 0 0; }
+  .pres-target { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; font-size: 13.5px; color: var(--ink-soft); flex-wrap: wrap; }
+  .pres-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .pres-row:first-child { border-top: none; }
+  .pres-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 1px; }
+  .pres-mark.hit { background: var(--good-wash); color: var(--good-ink); }
+  .pres-mark.miss { background: var(--amber-wash); color: var(--amber-ink); }
+  .pres-mark.unk { background: var(--paper-2); color: var(--muted); }
+  .pres-pt { flex: 1; font-size: 14.5px; line-height: 1.4; }
+  .pres-pt .why { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .pres-time { flex: none; font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin-top: 3px; }
   .onb-note { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; color: var(--good-ink); background: var(--good-wash); border-radius: var(--radius-sm); padding: 11px 14px; margin-bottom: 20px; }
   .onb-note svg { width: 15px; height: 15px; stroke: currentColor; flex: none; margin-top: 1px; }
   .mic-meter { display: flex; align-items: center; gap: 10px; }
@@ -310,6 +328,7 @@
         <div class="seg" id="modeSeg">
           <button class="on" data-mode="interview">Interview</button>
           <button data-mode="freetalk">Free talk</button>
+          <button data-mode="presentation">Presentation</button>
         </div>
         <span class="spacer"></span>
         <span class="toggle" id="camToggle"><span class="switch" aria-hidden="true"></span><span id="camLabel">Camera off</span></span>
@@ -319,6 +338,7 @@
       <div class="qcard card">
         <div class="q-label" style="display:flex;justify-content:space-between;align-items:center"><span id="qMode">Interview · Behavioral</span><button class="skip" id="newQ" style="font-size:12.5px">↻ New question</button></div>
         <div class="q-text" id="qText">Tell me about a time you solved a hard problem under pressure.</div>
+        <div class="pres-next" id="presNext"></div>
       </div>
 
       <div class="sess-grid">
@@ -337,7 +357,7 @@
           <div class="controls">
             <div>
               <button class="ctl" id="skipBtn" aria-label="New question"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8zM19 5v14"/></svg></button>
-              <div class="ctl-label">Skip</div>
+              <div class="ctl-label" id="skipLabel">Skip</div>
             </div>
             <div>
               <button class="rec-btn" id="recBtn" aria-label="Start recording"><span class="glyph"></span></button>
@@ -406,6 +426,11 @@
             <div id="tipText"></div>
           </div>
         </div>
+      </div>
+      <div class="card panel" id="presPanel" style="display:none;margin-bottom:16px">
+        <h3>Talking points</h3>
+        <p class="p-sub" id="presSub"></p>
+        <div id="presList"></div>
       </div>
       <div class="card panel">
         <h3>What you leaned on</h3>
@@ -587,6 +612,28 @@
     </div>
   </div>
 </div>
+<div class="cal-overlay" id="presModal" role="dialog" aria-modal="true" aria-labelledby="presTitleH">
+  <div class="cal-box pres-box">
+    <h3 id="presTitleH">Your talking points</h3>
+    <p class="cal-sub">Paste the points you want to hit, one per line, in order. While you rehearse, press <b>Next point</b> (or the → key, or a presentation clicker) as you move on. The recap shows which points you covered and how long each one took.</p>
+    <input class="inp" id="presTitle" type="text" maxlength="80" placeholder="Talk title (optional)">
+    <textarea class="pres-ta" id="presPoints" placeholder="Why our town needs a bike lane&#10;Three accidents on Main St last year&#10;What it would cost&#10;What I'm asking the council to do"></textarea>
+    <div class="pres-target">
+      <span>Target length</span>
+      <div class="seg" id="presLenSeg">
+        <button data-len="0">None</button>
+        <button data-len="3">3 min</button>
+        <button data-len="5">5 min</button>
+        <button data-len="10">10 min</button>
+        <button data-len="15">15 min</button>
+      </div>
+    </div>
+    <div class="cal-actions">
+      <button class="btn-accent" id="presSave">Save points</button>
+      <button class="btn-ghost" id="presCancel">Cancel</button>
+    </div>
+  </div>
+</div>
 <div class="onb" id="onb">
   <div class="onb-card">
     <div class="onb-step on" data-step="0">
@@ -614,6 +661,10 @@
         <div class="goal" data-goal="freetalk">
           <div class="g-ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
           <div><div class="g-t1">Everyday speaking</div><div class="g-t2">Meetings, calls, thinking out loud</div></div>
+        </div>
+        <div class="goal" data-goal="presentation">
+          <div class="g-ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/></svg></div>
+          <div><div class="g-t1">Presentations</div><div class="g-t2">Class talks, speeches, pitches</div></div>
         </div>
       </div>
       <div class="onb-foot">
@@ -692,9 +743,12 @@
         "What's the most interesting thing you've learned this month?",
         "Pitch your favorite idea — anything at all."
       ]
-    }
+    },
+    /* no question bank: the prompt is the user's own talking points */
+    presentation: { label: "Presentation", qs: [] }
   };
   function newQuestion() {
+    if (S.mode === "presentation") { renderPres(); return; }
     var bank = BANKS[S.mode] || BANKS.interview;
     var q = $("qText").textContent;
     var next = q;
@@ -702,17 +756,172 @@
     $("qText").textContent = next;
     $("qMode").textContent = bank.label;
   }
-  $("newQ").addEventListener("click", newQuestion);
-  $("skipBtn").addEventListener("click", newQuestion);
+  $("newQ").addEventListener("click", function () { if (S.mode === "presentation") presOpen(); else newQuestion(); });
+  $("skipBtn").addEventListener("click", function () { if (S.mode === "presentation") presStep(1); else newQuestion(); });
+  /* the question card, skip button and timer all change meaning in presentation mode */
+  function applyMode() {
+    var pres = S.mode === "presentation";
+    $("newQ").textContent = pres ? "✎ Edit points" : "↻ New question";
+    $("skipLabel").textContent = pres ? "Next point" : "Skip";
+    $("skipBtn").setAttribute("aria-label", pres ? "Next talking point" : "New question");
+    $("presNext").classList.toggle("on", pres);
+    if (pres) renderPres();
+    else { $("qMode").textContent = BANKS[S.mode].label; newQuestion(); }
+    if (!recognizing) resetLiveUI();
+  }
   document.querySelectorAll("#modeSeg button").forEach(function (b) {
     b.addEventListener("click", function () {
+      if (recognizing) return;
       document.querySelectorAll("#modeSeg button").forEach(function (x) { x.classList.remove("on"); });
       b.classList.add("on");
       S.mode = b.dataset.mode; persist();
-      $("qMode").textContent = BANKS[S.mode].label;
-      newQuestion();
+      applyMode();
+      if (S.mode === "presentation" && !PRES.points.length) presOpen();
     });
   });
+
+  /* ---------- presentation mode ----------
+     Rehearse against your own talking points. The user steps through them
+     (button, arrow keys, or a clicker — those send PageDown/PageUp) and the
+     recap reports which points the transcript actually covered and how long
+     each one took. */
+  var PRES = loadJSON("noums.pres", { title: "", points: [], target: 5 });
+  var PRES_MAX_MIN = 20;  /* keeps the recording under the transcribe function's 12 MB cap */
+  var presAt = 0, presMarks = [];
+  function presTargetText() { return PRES.target ? " / " + (PRES.target < 10 ? "0" : "") + PRES.target + ":00" : ""; }
+  function renderPres() {
+    var n = PRES.points.length;
+    $("qMode").textContent = "Presentation · " + (PRES.title || "Your talk");
+    if (!n) {
+      $("qText").textContent = "Add your talking points, then rehearse against them.";
+      $("presNext").textContent = "Tap “Edit points” to paste them in, one per line.";
+      return;
+    }
+    if (presAt >= n) presAt = n - 1;
+    $("qText").textContent = PRES.points[presAt];
+    $("presNext").innerHTML = "Point " + (presAt + 1) + " of " + n +
+      (presAt < n - 1 ? " · Next: " + escapeHtml(PRES.points[presAt + 1]) : " · Last point") +
+      (recognizing ? "" : ' · <kbd>→</kbd> next, <kbd>←</kbd> back');
+  }
+  function presStep(d) {
+    var n = PRES.points.length;
+    if (!n) { presOpen(); return; }
+    var to = Math.max(0, Math.min(n - 1, presAt + d));
+    if (to === presAt) return;
+    presAt = to;
+    if (recognizing) presMarks.push({ i: presAt, t: Date.now() });
+    renderPres();
+  }
+  function presOpen() {
+    if (recognizing) return;
+    $("presTitle").value = PRES.title || "";
+    $("presPoints").value = PRES.points.join("\n");
+    document.querySelectorAll("#presLenSeg button").forEach(function (b) { b.classList.toggle("on", parseInt(b.dataset.len, 10) === (PRES.target || 0)); });
+    $("presModal").classList.add("open");
+    setTimeout(function () { $("presPoints").focus(); }, 30);
+  }
+  function presClose() { $("presModal").classList.remove("open"); }
+  document.querySelectorAll("#presLenSeg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll("#presLenSeg button").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+    });
+  });
+  $("presSave").addEventListener("click", function () {
+    var on = document.querySelector("#presLenSeg button.on");
+    PRES = {
+      title: $("presTitle").value.trim(),
+      /* pasted outlines come with bullets and numbering; strip them */
+      points: $("presPoints").value.split(/\n/).map(function (l) { return l.replace(/^\s*(?:[-*•–·]|\d+[.)])\s*/, "").trim(); }).filter(Boolean).slice(0, 30),
+      target: on ? parseInt(on.dataset.len, 10) : 0
+    };
+    saveJSON("noums.pres", PRES);
+    presAt = 0;
+    presClose();
+    resetLiveUI();
+  });
+  $("presCancel").addEventListener("click", presClose);
+  $("presModal").addEventListener("click", function (e) { if (e.target === $("presModal")) presClose(); });
+  document.addEventListener("keydown", function (e) {
+    if (S.mode !== "presentation" || !$("view-practice").classList.contains("on")) return;
+    if ($("presModal").classList.contains("open")) { if (e.key === "Escape") presClose(); return; }
+    var tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || document.querySelector(".cal-overlay.open, .onb.open, #authOverlay.open")) return;
+    if (e.key === "ArrowRight" || e.key === "PageDown") { e.preventDefault(); presStep(1); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); presStep(-1); }
+  });
+
+  /* Coverage is a keyword match against the transcript: a point counts as
+     covered when at least half its content words were said. Crude, and
+     rephrasing can fool it, so the recap says "looks covered" and shows why. */
+  var PRES_STOP = ("about above after again also because been before being between both could does doing down during each from further have having here into just more most other over same should some such than that their them then there these they this those through under until very were what when where which while will with would your yours ours mine") .split(" ");
+  function presStem(w) {
+    w = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return w.replace(/(?:ing|ed|es|s)$/, function (m) { return w.length - m.length >= 4 ? "" : m; });
+  }
+  function presKeywords(pt) {
+    var seen = {}, out = [];
+    pt.split(/\s+/).forEach(function (raw) {
+      var clean = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!clean || PRES_STOP.indexOf(clean) > -1) return;
+      if (clean.length < 4 && !/\d/.test(clean)) return;
+      var st = presStem(clean);
+      if (!seen[st]) { seen[st] = 1; out.push({ w: raw.replace(/[^\w'-]/g, ""), s: st }); }
+    });
+    return out;
+  }
+  function presCoverage(pts, text) {
+    var said = {};
+    text.split(/\s+/).forEach(function (w) { var st = presStem(w); if (st) said[st] = 1; });
+    return pts.map(function (pt) {
+      var kw = presKeywords(pt);
+      if (!kw.length) return { pt: pt, state: "unk", missing: [] };
+      var missing = kw.filter(function (k) { return !said[k.s]; });
+      var hits = kw.length - missing.length;
+      return { pt: pt, state: hits >= Math.ceil(kw.length / 2) ? "hit" : "miss", missing: missing.map(function (k) { return k.w; }) };
+    });
+  }
+  function presTimes(marks, endT, n) {
+    var secs = []; for (var i = 0; i < n; i++) secs.push(0);
+    for (var m = 0; m < marks.length; m++) {
+      var until = m + 1 < marks.length ? marks[m + 1].t : endT;
+      secs[marks[m].i] += Math.max(0, (until - marks[m].t) / 1000);
+    }
+    return secs.map(Math.round);
+  }
+  function renderPresRecap() {
+    var R = lastRecap && lastRecap.pres;
+    $("presPanel").style.display = R ? "block" : "none";
+    if (!R) return;
+    var cov = presCoverage(R.points, finalText);
+    var hit = cov.filter(function (c) { return c.state === "hit"; }).length;
+    var judged = cov.filter(function (c) { return c.state !== "unk"; }).length;
+    /* per-point time only means something if they actually stepped through */
+    var stepped = R.marks.length > 1 || R.points.length === 1;
+    var times = stepped ? presTimes(R.marks, lastRecap.endT, R.points.length) : null;
+    var dur = Math.round(lastRecap.elapsed), sub;
+    if (!lastRecap.words) sub = "We didn't catch any words, so there's nothing to check your points against.";
+    else {
+      sub = "Looks like you covered " + hit + " of " + judged + " point" + (judged === 1 ? "" : "s");
+      if (R.target) {
+        var diff = dur - R.target * 60;
+        sub += " · " + fmtDur(dur) + " against a " + fmtDur(R.target * 60) + " target (" +
+          (Math.abs(diff) < 15 ? "right on time" : fmtDur(Math.abs(diff)) + (diff > 0 ? " over" : " under")) + ")";
+      }
+      sub += ". Matched by keywords, so rephrasing can fool it.";
+      if (!stepped) sub += " Press Next point as you go to see time per point.";
+    }
+    $("presSub").textContent = sub;
+    $("presList").innerHTML = cov.map(function (c, i) {
+      var why = "";
+      if (lastRecap.words && c.state === "miss") why = '<span class="why">Didn’t hear: ' + escapeHtml(c.missing.slice(0, 4).join(", ")) + "</span>";
+      if (c.state === "unk") why = '<span class="why">Too short to check</span>';
+      var mark = c.state === "hit" ? "✓" : c.state === "miss" ? "!" : "–";
+      return '<div class="pres-row"><span class="pres-mark ' + (lastRecap.words ? c.state : "unk") + '">' + mark + '</span>' +
+        '<span class="pres-pt">' + escapeHtml(c.pt) + why + "</span>" +
+        (times ? '<span class="pres-time">' + fmtDur(times[i]) + "</span>" : "") + "</div>";
+    }).join("");
+  }
 
   /* ---------- views ---------- */
   var navBtns = document.querySelectorAll(".nav button");
@@ -1120,6 +1329,7 @@
     renderTranscript();
     recognizing = true;
     startTime = Date.now();
+    if (S.mode === "presentation") { presAt = 0; presMarks = [{ i: 0, t: startTime }]; renderPres(); }
     $("recDot").classList.remove("idle");
     $("recBtn").classList.add("recording");
     $("recBtn").setAttribute("aria-label", "Stop recording");
@@ -1128,8 +1338,10 @@
     $("stageNote").textContent = "Recording — take your time, pauses are good";
     timerIv = setInterval(function () {
       var s = Math.floor((Date.now() - startTime) / 1000);
-      $("timer").textContent = (Math.floor(s / 60) < 10 ? "0" : "") + Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
-      if (S.sessLen && s >= S.sessLen * 60) endSession();
+      $("timer").textContent = (Math.floor(s / 60) < 10 ? "0" : "") + Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60) + (S.mode === "presentation" ? presTargetText() : "");
+      /* a talk runs to its own length, not the practice-session setting */
+      if (S.mode === "presentation") { if (s >= PRES_MAX_MIN * 60) endSession(); }
+      else if (S.sessLen && s >= S.sessLen * 60) endSession();
     }, 500);
 
     navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO }).then(function (stream) {
@@ -1188,8 +1400,9 @@
     $("recBtn").setAttribute("aria-label", "Start recording");
     $("recLabel").textContent = "Record";
     $("endBtn").disabled = true;
-    $("timer").textContent = "00:00";
-    $("stageNote").textContent = "Hit record and answer out loud";
+    $("timer").textContent = "00:00" + (S.mode === "presentation" ? presTargetText() : "");
+    $("stageNote").textContent = S.mode === "presentation" ? "Hit record and give your talk" : "Hit record and answer out loud";
+    if (S.mode === "presentation") renderPres();
   }
 
   $("recBtn").addEventListener("click", function () {
@@ -1232,6 +1445,7 @@
     $("ringFg").style.strokeDashoffset = circ - circ * (st.score / 100);
     $("ringNum").textContent = st.score;
     $("finalTranscript").innerHTML = markedFinalHtml || '<span class="placeholder">No transcript captured.</span>';
+    renderPresRecap();
     var sess = lastRecap.sess;
     if (sess) {
       sess.fillers = totalFillers; sess.counts = counts; sess.score = st.score;
@@ -1418,9 +1632,11 @@
       updateSideStreak();
       if (sb && signedInHandled) sb.from("sessions").insert([rowFromLocal(SESSIONS[SESSIONS.length - 1])]).then(function () {});
     }
-    lastRecap = { elapsed: elapsed, words: words, endT: endNow, sess: words > 0 ? SESSIONS[SESSIONS.length - 1] : null };
+    lastRecap = { elapsed: elapsed, words: words, endT: endNow, sess: words > 0 ? SESSIONS[SESSIONS.length - 1] : null,
+      pres: S.mode === "presentation" && PRES.points.length ? { points: PRES.points.slice(), target: PRES.target, marks: presMarks.slice() } : null };
 
-    $("recapSub").textContent = BANKS[S.mode].label + " · " + fmtDur(Math.round(elapsed));
+    $("recapSub").textContent = (S.mode === "presentation" && PRES.title ? "Presentation · " + PRES.title : BANKS[S.mode].label) + " · " + fmtDur(Math.round(elapsed));
+    renderPresRecap();
     $("mFill").textContent = totalFillers;
     $("mFpm").textContent = (Math.round(fpm * 10) / 10) + " / min";
     $("mWpm").textContent = words ? wpm : "—";
@@ -1712,7 +1928,7 @@
     $("recentWrap").innerHTML = recent.map(function (s) {
       var when = timeAgo(s.t);
       return '<div class="sess-row"><div class="sess-ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v11H7l-2 2z"/></svg></div>' +
-        '<div><div class="nm">' + (s.mode === "freetalk" ? "Free talk" : "Interview") + '</div><div class="mt">' + when + " · " + fmtDur(s.dur) + " · " + s.fillers + " fillers</div></div>" +
+        '<div><div class="nm">' + (s.mode === "freetalk" ? "Free talk" : s.mode === "presentation" ? "Presentation" : "Interview") + '</div><div class="mt">' + when + " · " + fmtDur(s.dur) + " · " + s.fillers + " fillers</div></div>" +
         '<span class="spacer"></span><span class="score-badge' + (s.score < 70 ? " mid" : "") + '">' + s.score + "</span></div>";
     }).join("");
 
@@ -1857,7 +2073,7 @@
       g.classList.add("on");
       S.mode = g.dataset.goal; persist();
       document.querySelectorAll("#modeSeg button").forEach(function (b) { b.classList.toggle("on", b.dataset.mode === S.mode); });
-      $("qMode").textContent = BANKS[S.mode].label;
+      applyMode();
     });
   });
   $("micTestBtn").addEventListener("click", function () {
@@ -2112,9 +2328,9 @@
   }
 
   /* ---------- init ---------- */
-  $("qMode").textContent = BANKS[S.mode].label;
+  if (!BANKS[S.mode]) S.mode = "interview";
   document.querySelectorAll("#modeSeg button").forEach(function (b) { b.classList.toggle("on", b.dataset.mode === S.mode); });
-  newQuestion();
+  applyMode();
   if (SUPABASE_URL && SUPABASE_ANON_KEY) {
     var sbScript = document.createElement("script");
     sbScript.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
