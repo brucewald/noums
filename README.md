@@ -30,8 +30,8 @@ noums/
 │                       gated by RLS on the signed-in email
 ├── supabase/
 │   ├── schema.sql      Tables, RLS policies, grants — the whole backend
-│   ├── emails/         Themed auth templates (not applied: Supabase
-│   │                   locks these until custom SMTP is configured)
+│   ├── emails/         Themed auth templates (not applied yet; now
+│   │                   unlocked since custom SMTP is configured)
 │   └── functions/
 │       └── transcribe/ Edge function: session audio → Deepgram
 └── design/
@@ -82,14 +82,22 @@ Then open http://localhost:3000 — the landing page links into `/app/`.
 
 ## Domains
 
-`noums.com` is registered (held since 2014, unused, expires 2027-01) —
-would require a purchase approach. Available as of 2026-07-21:
-`noums.app`, `noums.io`, `noums.co`, `noums.ai`, `getnoums.com`,
-`trynoums.com`.
+`noums.net` — registered at Squarespace, 2026-09. DNS lives there:
+
+- Website: four `A` records on `@` to GitHub Pages (185.199.108–111.153)
+  and `www` CNAME to `brucewald.github.io`. The `CNAME` file in the repo
+  root is GitHub's half of this; don't delete it.
+- Email: Resend's sending records (`resend._domainkey`, `send` MX + TXT,
+  `_dmarc`). Supabase Auth sends through Resend's SMTP as
+  `noums <hello@noums.net>`. Free plan: 100 emails/day, and the Supabase
+  email rate limit is set to 60/hour to match.
+
+`noums.com` is held by someone else (since 2014, expires 2027-01).
 
 ## Roadmap
 
-- [x] Deployed — https://brucewald.github.io/noums/ (GitHub Pages, auto-deploys on push to main)
+- [x] Deployed — https://noums.net (GitHub Pages, auto-deploys on push to main;
+      the old brucewald.github.io/noums address redirects)
 - [x] Confident-pause and stall tracking
 - [x] Accounts + sync — Supabase auth (magic link + Google) and per-user session history
 - [x] Reliable filler detection — Deepgram second pass, live
@@ -103,17 +111,17 @@ would require a purchase approach. Available as of 2026-07-21:
       per point. Coverage is shown but not synced.
 - [x] Keep-alive — `.github/workflows/keepalive.yml` pings the database
       every 3 days so the free project doesn't pause
-- [ ] Custom SMTP — the built-in mailer only delivers to the Supabase
-      org's own members (so email sign-in fails for everyone else) and caps
-      at a few per hour. Plan: buy a domain, send through Resend.
+- [x] Custom SMTP — Resend, sending from hello@noums.net
+- [x] Custom domain — noums.net
 - [ ] Pressure mode (Pro) — see `design/mockup.html`
 - [ ] Payments for Pro
 
 ## Google sign-in
 
 Live. `GOOGLE_CLIENT_ID` in `app/index.html` holds the production OAuth
-client (Google Cloud project "noums"), with `https://brucewald.github.io`
-as an authorized JavaScript origin.
+client (Google Cloud project "noums"), with `https://noums.net`,
+`https://www.noums.net` and the old `https://brucewald.github.io` as
+authorized JavaScript origins.
 
 It uses the Google Identity Services **ID-token** flow —
 `signInWithIdToken` with a hashed nonce, behind Google's own rendered
@@ -126,7 +134,7 @@ Two things this setup depends on: the client ID must be in Supabase's
 Google provider "Client IDs" field (the same field serves both OAuth and
 One Tap), and **"Skip nonce checks" must stay off**.
 
-Adding a custom domain later means adding it as an authorized origin here
+Changing the domain again means adding it as an authorized origin here
 and to the auth redirect allowlist in Supabase.
 
 ## Backend (Supabase)
@@ -154,10 +162,10 @@ The `transcribe` edge function needs `DEEPGRAM_API_KEY` set as a secret.
 Until it is, the function returns 503 and the app silently falls back to
 its on-device estimate — so this failure is invisible; check it directly.
 
-Note: the built-in email service only sends to members of the Supabase
-organization and is rate-limited to a few per hour — so until custom SMTP is
-configured, email sign-in effectively works only for the founder. Google
-sign-in is unaffected.
+Email goes through Resend (see Domains). Supabase's built-in mailer, which
+this replaced, only delivers to members of the Supabase organization, so if
+the custom SMTP settings are ever removed, email sign-in quietly stops
+working for everyone else.
 
 Free-tier projects pause after about a week without database activity. The
 `keepalive` workflow prevents that by calling the `keepalive()` function in
