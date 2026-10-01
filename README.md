@@ -30,8 +30,8 @@ noums/
 │                       gated by RLS on the signed-in email
 ├── supabase/
 │   ├── schema.sql      Tables, RLS policies, grants — the whole backend
-│   ├── emails/         Themed auth templates (not applied yet; now
-│   │                   unlocked since custom SMTP is configured)
+│   ├── emails/         Themed auth templates — live in Supabase
+│   │                   (Confirm signup + Magic Link); edit here, re-paste
 │   └── functions/
 │       └── transcribe/ Edge function: session audio → Deepgram
 └── design/
