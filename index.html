@@ -206,9 +206,16 @@
   .final { text-align: center; padding: 96px 0; }
   .final h2 { font-size: clamp(30px, 5vw, 52px); line-height: 1.04; }
   .final p { font-size: 18px; color: var(--muted); margin: 18px auto 30px; max-width: 46ch; }
-  footer { border-top: 1px solid var(--line); padding: 34px 0; }
-  .foot-in { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
-  .foot-in .logo { font-size: 18px; }
+  /* footer: keep in sync with site.css (help, news, privacy, terms) */
+  footer { border-top: 1px solid var(--line); background: var(--card-2); padding: 52px 0 28px; font-size: 14.5px; }
+  .foot-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 32px; }
+  @media (max-width: 760px) { .foot-grid { grid-template-columns: 1fr 1fr; } .foot-brand { grid-column: 1 / -1; } }
+  .foot-brand .logo { text-decoration: none; }
+  .foot-brand p { color: var(--muted); margin: 12px 0 18px; max-width: 280px; }
+  .foot-col h4 { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 4px 0 14px; font-weight: 600; }
+  .foot-col a { display: block; color: var(--ink); text-decoration: none; margin: 0 0 10px; }
+  .foot-col a:hover { color: var(--accent-ink); }
+  .foot-bottom { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 22px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
 
   @media (prefers-reduced-motion: reduce) {
     .live-dot, .caret { animation: none; }
@@ -268,7 +275,7 @@
   <div class="strip">
     <div class="wrap strip-in">
       <div class="strip-item"><span class="n">3</span><span class="l">practice modes: interview, presentation, free talk</span></div>
-      <div class="strip-item"><span class="n">0</span><span class="l">recordings stored — audio is analysed, then discarded</span></div>
+      <div class="strip-item"><span class="n">0</span><span class="l">recordings saved by noums — audio is analysed, then discarded</span></div>
       <div class="strip-item"><span class="n">2 min</span><span class="l">is enough for a full session</span></div>
     </div>
   </div>
@@ -435,10 +442,35 @@
   </section>
 
   <footer>
-    <div class="wrap foot-in">
-      <div class="logo"><span class="rec" aria-hidden="true"></span>noums</div>
-      <div>noums.net — speech coaching that counts.</div>
-      <div class="mono" style="color:var(--muted-2)">© 2026</div>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="logo" href="./"><span class="rec" aria-hidden="true"></span>noums</a>
+          <p>Speech practice that counts every "um," so you can swap it for a confident pause.</p>
+          <a class="btn btn-primary" href="mailto:hello@noums.net">Contact us</a>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="app/">Open the app</a>
+          <a href="#modes">Practice modes</a>
+          <a href="#pricing">Pricing</a>
+        </div>
+        <div class="foot-col">
+          <h4>Support</h4>
+          <a href="help/">Help &amp; FAQ</a>
+          <a href="mailto:hello@noums.net">hello@noums.net</a>
+        </div>
+        <div class="foot-col">
+          <h4>Company</h4>
+          <a href="news/">News</a>
+          <a href="privacy/">Privacy Policy</a>
+          <a href="terms/">Terms of Use</a>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span>&copy; 2026 noums · noums.net</span>
+        <span>Say what you mean. Skip the "um."</span>
+      </div>
     </div>
   </footer>
 </div>

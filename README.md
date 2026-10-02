@@ -25,6 +25,11 @@ noums/
 ├── app/
 │   └── index.html      The app — onboarding, mic calibration, practice,
 │                       recap, progress dashboard, settings
+├── help/ news/        Static info pages linked from the footer: FAQ,
+├── privacy/ terms/   changelog, privacy policy, terms. They share site.css;
+│                     the footer markup is duplicated in each page and in
+│                     index.html, so change all five together
+├── site.css
 ├── admin/
 │   └── index.html      Founder dashboard (visits, users, sessions),
 │                       gated by RLS on the signed-in email
