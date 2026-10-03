@@ -57,6 +57,10 @@ Deno.serve(async (req: Request) => {
     punctuate: "true",
     smart_format: "false",
     language: lang,
+    // Keep users' audio out of Deepgram's Model Improvement Program, so
+    // "noums never keeps your recordings" holds for our vendor too. The
+    // privacy policy (privacy/index.html) relies on this.
+    mip_opt_out: "true",
   });
 
   let dg: Response;
