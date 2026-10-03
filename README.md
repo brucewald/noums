@@ -165,6 +165,12 @@ model needs the table grants to the `authenticated` role that
 `schema.sql` includes — without them RLS passes and the queries still fail.
 
 The `transcribe` edge function needs `DEEPGRAM_API_KEY` set as a secret.
+It deploys separately from GitHub Pages: a change to
+`supabase/functions/transcribe/index.ts` does nothing until it is redeployed
+(Supabase dashboard → Edge Functions → transcribe, or
+`supabase functions deploy transcribe`). It sends `mip_opt_out=true` so
+Deepgram doesn't keep audio for model training; the privacy policy depends
+on that, so don't drop it.
 Until it is, the function returns 503 and the app silently falls back to
 its on-device estimate — so this failure is invisible; check it directly.
 
