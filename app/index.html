@@ -66,6 +66,12 @@
   /* practice */
   .sess-top { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
   .sess-top .spacer { flex: 1; }
+  /* the mode picker is the main choice on the page, so it's louder than other .seg controls */
+  #modeSeg { padding: 5px; gap: 4px; border-width: 1.5px; box-shadow: 0 1px 3px rgba(43,38,32,.06); }
+  #modeSeg button { font-size: 16px; font-weight: 600; padding: 11px 24px; color: var(--ink-soft); transition: background .15s ease, color .15s ease; }
+  #modeSeg button:hover:not(.on) { color: var(--ink); background: var(--paper); }
+  #modeSeg button.on { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(241,88,63,.35); }
+  @media (max-width: 640px) { #modeSeg { display: flex; width: 100%; } #modeSeg button { flex: 1; font-size: 14.5px; padding: 11px 4px; } }
   .toggle { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-soft); cursor: pointer; user-select: none; }
   .switch { width: 38px; height: 22px; border-radius: 999px; background: var(--line-2); position: relative; transition: background .18s ease; flex: none; }
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .18s ease; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
