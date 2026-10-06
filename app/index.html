@@ -22,7 +22,7 @@
   }
   html, body { background: #F0EADD; }
   * { box-sizing: border-box; }
-  body { margin: 0; }
+  body { margin: 0; font-family: var(--font-body); color: var(--ink); -webkit-font-smoothing: antialiased; }
   .app { background: var(--cream); color: var(--ink); font-family: var(--font-body); line-height: 1.55; -webkit-font-smoothing: antialiased; min-height: 100vh; display: grid; grid-template-columns: 232px 1fr; }
   @media (max-width: 860px) { .app { grid-template-columns: 1fr; } }
   .mono { font-family: var(--font-mono); }
@@ -600,7 +600,7 @@
       Continue with Google
     </button>
     <div class="auth-err" id="gNote" style="color:var(--muted)">Google sign-in is almost ready — use email for now.</div>
-    <div class="auth-note">No password needed. We'll never email you without asking. By continuing you agree to the <a href="../terms/" target="_blank" style="color:inherit">Terms</a> and <a href="../privacy/" target="_blank" style="color:inherit">Privacy Policy</a>.</div>
+    <div class="auth-note"><b>No passwords or sensitive information are saved.</b> Sign in with a one-tap email link or Google. By continuing you agree to the <a href="../terms/" target="_blank" style="color:inherit">Terms</a> and <a href="../privacy/" target="_blank" style="color:inherit">Privacy Policy</a>.</div>
   </div>
 </div>
 
@@ -2317,7 +2317,6 @@
     if (sb) {
       $("authGo").textContent = "Email me a sign-in link";
       document.querySelector("#authOverlay .lede").textContent = "Free for daily practice. Sign in and your progress syncs to every device.";
-      document.querySelector("#authOverlay .auth-note").textContent = "No password — we email you a one-tap sign-in link.";
     } else if (chosenPlan === "pro") { $("authGo").textContent = "Create account"; }
     $("authOverlay").classList.add("open");
     initGoogleButton();
