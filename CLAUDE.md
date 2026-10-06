@@ -49,8 +49,11 @@ does. Check the app code before writing any claim.
 - Each page is a self-contained file with no build step. Test pages with
   Playwright against `python3 -m http.server`. Real mic and speech can't be
   tested here, so fake `SpeechRecognition`.
-- Filler counting decides from context whether "like", "so", "you know" and
-  "kind of" are fillers (`fillerInContext` in `app/index.html`). After
-  changing those rules, run `node tests/filler-context.test.js`.
+- "like", "so", "you know" and "kind of" are never silently dropped. When one
+  sits mid-sentence with words on both sides that suggest a real word, it is
+  shown as a dashed "maybe", not counted until the user taps it
+  (`fillerInContext` in `app/index.html`; false means "maybe"). This is the
+  owner's chosen design. After changing the rules, run
+  `node tests/filler-context.test.js`.
 - This environment can't reach noums.net or Supabase directly. Ask the owner
   to check the live site when that matters.

@@ -16,7 +16,7 @@ function count(sentence, recap){
       const fw=f.split(' '); if(!fw.every((x,q)=>words[i+q]&&words[i+q].n===x)) continue;
       const prev=words.slice(0,i).reverse().slice(0,3).map(w=>w.n), next=words.slice(i+fw.length,i+fw.length+3).map(w=>w.n);
       const last=words[i+fw.length-1];
-      const cue=recap?{start:i===0||/[.!?]$/.test(words[i-1].raw),punctBefore:i>0&&/[,;:]$/.test(words[i-1].raw),punctAfter:/[,;:]$/.test(last.raw),pauseBefore:words[i].gap,pauseAfter:!!(words[i+fw.length]&&words[i+fw.length].gap)}:{};
+      const cue=recap?{start:i===0||/[.!?]$/.test(words[i-1].raw),end:/[.!?]$/.test(last.raw),punctBefore:i>0&&/[,;:]$/.test(words[i-1].raw),punctAfter:/[,;:]$/.test(last.raw),pauseBefore:words[i].gap,pauseAfter:!!(words[i+fw.length]&&words[i+fw.length].gap)}:{};
       if(F(f,prev,next,cue)) hits.push(f); i+=fw.length-1; break;
     }
   }
@@ -34,7 +34,9 @@ const cases=[ // [sentence, expected fillers in recap, expected live (no punctua
  ["It was [p] like [p] the worst day.", ["like"], ["like"]],
  ["It was so good.", [], []],
  ["I was tired so I left.", [], []],
- ["I think so.", [], []],
+ ["I was so tired.", [], []],
+ ["I didn't like this guy.", [], []],
+ ["I think so.", ["so"], ["so"]],  // sentence end: not surrounded, so it counts
  ["So, I think the answer is yes.", ["so"], ["so"]],
  ["So I started a club.", ["so"], ["so"]],
  ["Do you know where it is?", [], []],

@@ -128,6 +128,10 @@
   .transcript .fill[data-fid] { cursor: pointer; }
   .transcript .fill[data-fid]:hover { background: var(--amber); color: #fff; }
   .transcript .fill.dismissed, .transcript .fill.dismissed:hover { opacity: .5; text-decoration: line-through; background: var(--paper-2); color: var(--muted); border-bottom: none; }
+  /* "maybe": context says this is probably a real word ("didn't like him"), so it isn't counted until tapped */
+  .transcript .fill.maybe.dismissed { opacity: 1; text-decoration: none; background: transparent; color: var(--amber-ink); font-weight: 500; outline: 1.5px dashed var(--amber); outline-offset: -1.5px; }
+  .transcript .fill.maybe.dismissed:hover { background: var(--amber-wash); color: var(--amber-ink); }
+  .transcript .fill.maybe.dismissed::after { content: "?"; font-size: .75em; font-weight: 700; margin-left: 2px; vertical-align: super; line-height: 0; }
   .cal-overlay { position: fixed; inset: 0; background: rgba(43,38,32,.45); display: none; align-items: center; justify-content: center; z-index: 70; padding: 18px; }
   .cal-overlay.open { display: flex; }
   .cal-box { max-width: 440px; width: 100%; background: var(--paper); border: 1px solid var(--line); border-radius: 20px; padding: 30px 32px; box-sizing: border-box; }
@@ -425,7 +429,7 @@
         </div>
         <div class="card replay-card">
           <h3>Your answer, marked up</h3>
-          <p class="p-sub">Fillers highlighted in amber — tap one if we got it wrong <span class="vbadge" id="verifyBadge" style="display:none"></span></p>
+          <p class="p-sub">Fillers highlighted in amber, tap one if we got it wrong. Dashed ones with a ? are maybes: not counted unless you tap them <span class="vbadge" id="verifyBadge" style="display:none"></span></p>
           <div class="transcript" id="finalTranscript" style="flex:1"></div>
           <div class="tip" id="tipBox" style="display:none">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12c1 1 1 2 1 3h6c0-1 0-2 1-3a7 7 0 0 0-4-12Z"/></svg>
@@ -968,8 +972,10 @@
   /* ---------- is this "like" actually a filler? ----------
      "like", "so", "you know" and "kind of" are often real words: "I didn't
      like him", "so good", "do you know", "what kind of". Matching the word
-     alone counted all of them. We can't hear tone, but the neighbouring
-     words and, after the recap pass, commas and pauses settle most cases.
+     alone counted all of them. We can't hear tone, so when the neighbouring
+     words (and, after the recap pass, commas and pauses) suggest a real
+     word, the match is shown as a "maybe": marked, not counted, and one
+     tap away from counting. false here means "maybe", never "drop".
      prev/next are normalised words, nearest first. cue carries what only
      the recap knows: start (sentence start), punctBefore/punctAfter (a
      comma-like break), pauseBefore/pauseAfter (a gap in the word timings). */
@@ -988,9 +994,18 @@
     youKnowAfter: wordSet("how why where when who which whether if that the him her it them me us about each everyone anyone someone my your his their our a an"),
     kindNoun: wordSet("what a the this that any some every one same different which my your his her our their new other no")
   };
+  function maybeSpan(fid, maybe, raw) {
+    if (!fid) return '<span class="fill' + (maybe ? " maybe dismissed" : "") + '">' + escapeHtml(raw) + "</span>";
+    if (maybe) return '<span class="fill maybe dismissed" data-fid="' + fid + '" title="maybe a filler: tap to count it">' + escapeHtml(raw) + "</span>";
+    return '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + escapeHtml(raw) + "</span>";
+  }
   function fillerInContext(f, prev, next, cue) {
     cue = cue || {};
     var p1 = prev[0] || "", n1 = next[0] || "";
+    /* only a word sitting inside a sentence, with words on both sides, can be
+       a maybe ("I didn't like this guy", "I was so tired"). At a sentence's
+       start or end it counts as a filler. */
+    if (!p1 || !n1 || cue.start || cue.end) return true;
     /* a break or another filler right beside it is the strongest sign */
     if (cue.punctBefore || cue.punctAfter || cue.pauseBefore || cue.pauseAfter) return true;
     if (CTX.neighbourFiller[p1] || CTX.neighbourFiller[n1] || p1 === f) return true;
@@ -1029,7 +1044,7 @@
     var out = "", wi = 0, pj = 0;
     function emit(upto) { while (pj < upto) { out += escapeHtml(parts[pj]); pj++; } }
     while (wi < idx.length) {
-      var matched = null, span = 0;
+      var matched = null, span = 0, maybe = false;
       for (var k = 0; k < act.length && !matched; k++) {
         var fw = act[k].split(" ");
         if (wi + fw.length > idx.length) continue;
@@ -1039,14 +1054,18 @@
         var prev = norm.slice(0, wi).reverse().concat(beforeWords).slice(0, 3);
         var next = norm.slice(wi + fw.length, wi + fw.length + 3);
         /* the recognizer finalises an utterance at a pause, so a chunk's first word starts a sentence */
-        if (fillerInContext(act[k], prev, next, { start: wi === 0 })) { matched = act[k]; span = fw.length; }
+        matched = act[k]; span = fw.length;
+        maybe = !fillerInContext(act[k], prev, next, { start: wi === 0 });
       }
       if (!matched) { wi++; continue; }
       emit(idx[wi]);
       var raw = parts.slice(idx[wi], idx[wi + span - 1] + 1).join("");
       pj = idx[wi + span - 1] + 1;
       var fid = 0;
-      if (countThem) {
+      if (countThem && maybe) {
+        fid = nextFid++;
+        fillerEvents.push({ id: fid, f: matched, t: Date.now(), dis: true, maybe: true });
+      } else if (countThem) {
         var now = Date.now(), deduped = false;
         if (VOCAL.indexOf(matched) > -1) {
           lastTranscriptVocal = now;
@@ -1059,8 +1078,7 @@
           fillerEvents.push({ id: fid, f: matched, t: now, dis: false });
         }
       }
-      out += fid ? '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + escapeHtml(raw) + "</span>"
-                 : '<span class="fill">' + escapeHtml(raw) + "</span>";
+      out += maybeSpan(fid, maybe, raw);
       wi += span;
     }
     emit(parts.length);
@@ -1080,6 +1098,8 @@
     var html = '<span class="chip total">total <b style="color:inherit">' + totalFillers + "</b></span>";
     if (!keys.length) { html += '<span class="chip zero">clean so far <b>✓</b></span>'; }
     else keys.slice(0, 4).forEach(function (k) { html += '<span class="chip">' + k + " <b>" + counts[k] + "</b></span>"; });
+    var maybes = fillerEvents.filter(function (e) { return e.maybe && e.dis; }).length;
+    if (maybes) html += '<span class="chip zero">maybe <b>' + maybes + "</b></span>";
     html += '<span class="chip zero">pauses <b>' + pauses + "</b></span>";
     $("tally").innerHTML = html;
   }
@@ -1809,12 +1829,13 @@
         var lastW = w[i + span - 1];
         var cue = {
           start: i === 0 || /[.!?]["']?$/.test(w[i - 1].w),
+          end: /[.!?]["']?$/.test(lastW.w),
           punctBefore: i > 0 && /[,;:\u2014-]$/.test(w[i - 1].w),
           punctAfter: /[,;:\u2014-]$/.test(lastW.w),
           pauseBefore: i > 0 && (w[i].start || 0) - (w[i - 1].end || 0) >= FILLER_GAP,
           pauseAfter: i + span < w.length && (w[i + span].start || 0) - (lastW.end || 0) >= FILLER_GAP
         };
-        if (!fillerInContext(matched, prevW, nextW, cue)) { matched = null; span = 0; }
+        var maybe = !fillerInContext(matched, prevW, nextW, cue);
       }
       if (i > 0) {
         /* silence leading into a filler is the wind-up to the "um", not poise */
@@ -1823,12 +1844,11 @@
         else if (gap >= PAUSE_MIN && !matched) { pauses++; html += PMARK; }
       }
       if (matched) {
-        counts[matched] = (counts[matched] || 0) + 1;
-        totalFillers++;
+        if (!maybe) { counts[matched] = (counts[matched] || 0) + 1; totalFillers++; }
         var fid = nextFid++;
-        fillerEvents.push({ id: fid, f: matched, t: startTime + Math.round((w[i].start || 0) * 1000), dis: false });
+        fillerEvents.push({ id: fid, f: matched, t: startTime + Math.round((w[i].start || 0) * 1000), dis: maybe, maybe: maybe });
         var txt = w.slice(i, i + span).map(function (x) { return x.w; }).join(" ");
-        html += '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + escapeHtml(txt) + "</span> ";
+        html += maybeSpan(fid, maybe, txt) + " ";
         i += span;
       } else {
         html += escapeHtml(w[i].w) + " ";
