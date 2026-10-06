@@ -965,29 +965,105 @@
 
   function activeFillers() { return ALL_FILLERS.filter(function (f) { return S.fillers.indexOf(f) > -1; }); }
 
-  function markFillers(text, countThem) {
-    var out = escapeHtml(text);
-    activeFillers().forEach(function (f) {
-      var re = new RegExp("\\b(" + f.replace(/ /g, "\\s+") + ")\\b", "gi");
-      out = out.replace(re, function (m) {
-        var fid = 0;
-        if (countThem) {
-          var now = Date.now(), deduped = false;
-          if (VOCAL.indexOf(f) > -1) {
-            lastTranscriptVocal = now;
-            while (acousticQueue.length && now - acousticQueue[0] > 4000) acousticQueue.shift();
-            if (acousticQueue.length) { acousticQueue.shift(); deduped = true; }
-          }
-          if (!deduped) {
-            counts[f] = (counts[f] || 0) + 1; totalFillers++;
-            fid = nextFid++;
-            fillerEvents.push({ id: fid, f: f, t: now, dis: false });
-          }
+  /* ---------- is this "like" actually a filler? ----------
+     "like", "so", "you know" and "kind of" are often real words: "I didn't
+     like him", "so good", "do you know", "what kind of". Matching the word
+     alone counted all of them. We can't hear tone, but the neighbouring
+     words and, after the recap pass, commas and pauses settle most cases.
+     prev/next are normalised words, nearest first. cue carries what only
+     the recap knows: start (sentence start), punctBefore/punctAfter (a
+     comma-like break), pauseBefore/pauseAfter (a gap in the word timings). */
+  function wordSet(str) { var o = {}; str.split(" ").forEach(function (x) { o[x] = 1; }); return o; }
+  var CTX = {
+    neighbourFiller: wordSet("um uh er ah umm uhh hmm"),
+    /* verb "like": I like, didn't like, would like, really like, to like */
+    likeVerbBefore: wordSet("i you we they who would i'd you'd we'd they'd do does did don't didn't doesn't not never really particularly also still always might may could should will i'll to just kinda genuinely honestly actually definitely totally"),
+    /* comparison "like": looks like, things like, a lot like */
+    likeCompareBefore: wordSet("look looks looked looking feel feels felt feeling sound sounds sounded seem seems seemed something anything nothing everything things stuff people someone somebody more much lot exactly kind sort act acted acting"),
+    likeObjectAfter: wordSet("to it him her them me us that this these those my your his their our its"),
+    /* intensifier or connective "so": so good, so that, so far */
+    soIntensify: wordSet("much many good bad hard easy fast long far big little happy sad excited tired cool great glad sure proud nice important weird funny fun cute pretty close often well quickly quick early late busy hot cold stressed nervous scared high low few small true awesome amazing boring annoying crazy strange different that on bored worried lucky grateful thankful"),
+    soAfterWord: wordSet("think hope guess said told believe suppose if not or do say"),
+    youKnowBefore: wordSet("do did don't didn't if would as"),
+    youKnowAfter: wordSet("how why where when who which whether if that the him her it them me us about each everyone anyone someone my your his their our a an"),
+    kindNoun: wordSet("what a the this that any some every one same different which my your his her our their new other no")
+  };
+  function fillerInContext(f, prev, next, cue) {
+    cue = cue || {};
+    var p1 = prev[0] || "", n1 = next[0] || "";
+    /* a break or another filler right beside it is the strongest sign */
+    if (cue.punctBefore || cue.punctAfter || cue.pauseBefore || cue.pauseAfter) return true;
+    if (CTX.neighbourFiller[p1] || CTX.neighbourFiller[n1] || p1 === f) return true;
+    if (f === "like") {
+      if (CTX.likeVerbBefore[p1] || CTX.likeCompareBefore[p1]) return false;
+      if (CTX.likeObjectAfter[n1]) return false;
+      return true;
+    }
+    if (f === "so") {
+      if (CTX.soIntensify[n1] || CTX.soAfterWord[p1]) return false;
+      if (p1 === "and" && n1 === "on") return false;
+      /* mid-sentence "so" is usually "therefore" ("I was tired so I left");
+         the filler one opens a sentence or answer */
+      if (p1 && !cue.start) return false;
+      return true;
+    }
+    if (f === "you know") {
+      if (CTX.youKnowBefore[p1] || CTX.youKnowAfter[n1]) return false;
+      return true;
+    }
+    if (f === "kind of" || f === "sort of") {
+      if (CTX.kindNoun[p1]) return false;
+      return true;
+    }
+    return true;
+  }
+
+  /* before = transcript so far, so a chunk's first word still has context */
+  function markFillers(text, countThem, before) {
+    var act = activeFillers().slice().sort(function (a, b) { return b.split(" ").length - a.split(" ").length; });
+    var parts = text.split(/(\s+)/);
+    var idx = [];  /* positions of word tokens in parts */
+    for (var j = 0; j < parts.length; j++) if (parts[j] && !/^\s+$/.test(parts[j])) idx.push(j);
+    var norm = idx.map(function (j) { return normWord(parts[j]); });
+    var beforeWords = String(before || "").trim().split(/\s+/).filter(Boolean).map(normWord).reverse();
+    var out = "", wi = 0, pj = 0;
+    function emit(upto) { while (pj < upto) { out += escapeHtml(parts[pj]); pj++; } }
+    while (wi < idx.length) {
+      var matched = null, span = 0;
+      for (var k = 0; k < act.length && !matched; k++) {
+        var fw = act[k].split(" ");
+        if (wi + fw.length > idx.length) continue;
+        var ok = true;
+        for (var q = 0; q < fw.length; q++) if (norm[wi + q] !== fw[q]) { ok = false; break; }
+        if (!ok) continue;
+        var prev = norm.slice(0, wi).reverse().concat(beforeWords).slice(0, 3);
+        var next = norm.slice(wi + fw.length, wi + fw.length + 3);
+        /* the recognizer finalises an utterance at a pause, so a chunk's first word starts a sentence */
+        if (fillerInContext(act[k], prev, next, { start: wi === 0 })) { matched = act[k]; span = fw.length; }
+      }
+      if (!matched) { wi++; continue; }
+      emit(idx[wi]);
+      var raw = parts.slice(idx[wi], idx[wi + span - 1] + 1).join("");
+      pj = idx[wi + span - 1] + 1;
+      var fid = 0;
+      if (countThem) {
+        var now = Date.now(), deduped = false;
+        if (VOCAL.indexOf(matched) > -1) {
+          lastTranscriptVocal = now;
+          while (acousticQueue.length && now - acousticQueue[0] > 4000) acousticQueue.shift();
+          if (acousticQueue.length) { acousticQueue.shift(); deduped = true; }
         }
-        if (!fid) return '<span class="fill">' + m + "</span>";
-        return '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + m + "</span>";
-      });
-    });
+        if (!deduped) {
+          counts[matched] = (counts[matched] || 0) + 1; totalFillers++;
+          fid = nextFid++;
+          fillerEvents.push({ id: fid, f: matched, t: now, dis: false });
+        }
+      }
+      out += fid ? '<span class="fill" data-fid="' + fid + '" title="not a filler? tap to remove">' + escapeHtml(raw) + "</span>"
+                 : '<span class="fill">' + escapeHtml(raw) + "</span>";
+      wi += span;
+    }
+    emit(parts.length);
     return out;
   }
 
@@ -1016,6 +1092,8 @@
      nothing. Past STALL_MIN silence stops reading as poise and starts reading
      as lost. Nothing falls between the two: every gap is one or the other. */
   var PAUSE_MIN = 1.2, STALL_MIN = 4;
+  /* a hesitation this long beside "like"/"so" marks it as a filler */
+  var FILLER_GAP = 0.35;
   var DEFAULT_SIL = 0.008, DEFAULT_SPEECH = 0.016;
   var SIL_T = DEFAULT_SIL, SPEECH_T = DEFAULT_SPEECH, FILL_T = 0.011;
   /* Bump whenever the capture path changes: thresholds are levels measured off
@@ -1370,7 +1448,7 @@
       interimText = "";
       for (var i = e.resultIndex; i < e.results.length; i++) {
         var txt = e.results[i][0].transcript;
-        if (e.results[i].isFinal) { finalText += txt + " "; markedFinalHtml += markFillers(txt + " ", true); }
+        if (e.results[i].isFinal) { var ctxBefore = finalText; finalText += txt + " "; markedFinalHtml += markFillers(txt + " ", true, ctxBefore); }
         else interimText += txt;
       }
       if (interimText && interimText !== prevInterim) {
@@ -1723,6 +1801,20 @@
           if (normWord(w[i + p].w) !== parts[p]) { ok = false; break; }
         }
         if (ok) { matched = act[k]; span = parts.length; }
+      }
+      if (matched) {
+        var prevW = [], nextW = [];
+        for (var b = i - 1; b >= 0 && prevW.length < 3; b--) prevW.push(normWord(w[b].w));
+        for (var a = i + span; a < w.length && nextW.length < 3; a++) nextW.push(normWord(w[a].w));
+        var lastW = w[i + span - 1];
+        var cue = {
+          start: i === 0 || /[.!?]["']?$/.test(w[i - 1].w),
+          punctBefore: i > 0 && /[,;:\u2014-]$/.test(w[i - 1].w),
+          punctAfter: /[,;:\u2014-]$/.test(lastW.w),
+          pauseBefore: i > 0 && (w[i].start || 0) - (w[i - 1].end || 0) >= FILLER_GAP,
+          pauseAfter: i + span < w.length && (w[i + span].start || 0) - (lastW.end || 0) >= FILLER_GAP
+        };
+        if (!fillerInContext(matched, prevW, nextW, cue)) { matched = null; span = 0; }
       }
       if (i > 0) {
         /* silence leading into a filler is the wind-up to the "um", not poise */
