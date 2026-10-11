@@ -1534,6 +1534,16 @@
     return { fpm: fpm, clean: cleanSec, score: score };
   }
 
+  function setVerdict(words, fpm) {
+    var verdict, sub;
+    if (!words) { verdict = "We didn't catch any words."; sub = "Check your mic and try again — Chrome and Edge work best."; }
+    else if (fpm < 1.5) { verdict = "Clear and steady."; sub = "Barely any fillers. That's what confident pauses sound like."; }
+    else if (fpm < 4) { verdict = "Solid — a few crutches."; sub = "You're close. Swap the highlighted words for a breath."; }
+    else { verdict = "Good raw material."; sub = "Lots of fillers means lots of easy wins. Same answer, more pauses."; }
+    if (words && pauses > 0) sub += " You held " + pauses + " confident pause" + (pauses === 1 ? "" : "s") + " instead of filling.";
+    $("verdict").textContent = verdict;
+    $("verdictSub").textContent = sub;
+  }
   function refreshRecapAfterEdit() {
     if (!lastRecap) return;
     var st = computeStats(lastRecap.elapsed, lastRecap.words, lastRecap.endT);
@@ -1542,6 +1552,7 @@
     $("mStall").textContent = stalls;
     $("mFpm").textContent = (Math.round(st.fpm * 10) / 10) + " / min";
     $("mClean").textContent = lastRecap.words ? (st.clean >= 60 ? fmtDur(st.clean) : st.clean + "s") : "—";
+    setVerdict(lastRecap.words, st.fpm);
     renderBars($("barsWrap"), counts, true);
     document.querySelectorAll("#barsWrap .bar-fill").forEach(function (b) { b.style.width = b.getAttribute("data-w") + "%"; });
     var circ = 314;
@@ -1715,6 +1726,15 @@
   /* ---------- recap ---------- */
   function endSession() {
     if (!recognizing) return;
+    /* the recognizer only finalises a phrase after a pause, so whatever was
+       still interim when Finish was pressed (a short answer can be all of
+       it) would otherwise be dropped and the recap would report no words */
+    if (interimText.trim()) {
+      var ctxBefore = finalText;
+      finalText += interimText + " ";
+      markedFinalHtml += markFillers(interimText + " ", true, ctxBefore);
+      interimText = "";
+    }
     var elapsed = Math.max(1, (Date.now() - startTime) / 1000);
     logLevels(elapsed);
     var audioP = stopRecorder();
@@ -1747,14 +1767,7 @@
     $("mTime").textContent = fmtDur(Math.round(elapsed));
     $("mWords").textContent = words + " words";
 
-    var verdict, sub;
-    if (!words) { verdict = "We didn't catch any words."; sub = "Check your mic and try again — Chrome and Edge work best."; }
-    else if (fpm < 1.5) { verdict = "Clear and steady."; sub = "Barely any fillers. That's what confident pauses sound like."; }
-    else if (fpm < 4) { verdict = "Solid — a few crutches."; sub = "You're close. Swap the highlighted words for a breath."; }
-    else { verdict = "Good raw material."; sub = "Lots of fillers means lots of easy wins. Same answer, more pauses."; }
-    if (words && pauses > 0) sub += " You held " + pauses + " confident pause" + (pauses === 1 ? "" : "s") + " instead of filling.";
-    $("verdict").textContent = verdict;
-    $("verdictSub").textContent = sub;
+    setVerdict(words, fpm);
     $("mPause").textContent = pauses;
     $("mClean").textContent = words ? (cleanSec >= 60 ? fmtDur(cleanSec) : cleanSec + "s") : "—";
     $("mStall").textContent = stalls;
@@ -1863,6 +1876,15 @@
     $("mWords").textContent = words + " words";
     $("mWpm").textContent = words ? Math.round(words / (elapsed / 60)) : "—";
     if (lastRecap.sess) lastRecap.sess.words = words;
+    else if (words > 0) {
+      var st = computeStats(elapsed, words, lastRecap.endT);
+      SESSIONS.push({ t: lastRecap.endT, mode: S.mode, dur: Math.round(elapsed), words: words, fillers: totalFillers, counts: counts, score: st.score, fpm: Math.round(st.fpm * 10) / 10, pauses: pauses, stalls: stalls, clean: st.clean });
+      if (SESSIONS.length > 200) SESSIONS = SESSIONS.slice(-200);
+      lastRecap.sess = SESSIONS[SESSIONS.length - 1];
+      persistSessions();
+      updateSideStreak();
+      if (sb && signedInHandled) sb.from("sessions").insert([rowFromLocal(lastRecap.sess)]).then(function () {});
+    }
     refreshRecapAfterEdit();
   }
 
