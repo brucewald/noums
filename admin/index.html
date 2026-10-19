@@ -114,6 +114,16 @@
       <div class="xlab" id="xlab"></div>
       <details><summary>View as table</summary><table id="dataTable"><thead><tr><th>Day</th><th>Landing</th><th>App</th><th>Total</th></tr></thead><tbody></tbody></table></details>
     </div>
+    <div class="card" style="margin-top:14px">
+      <div class="chart-head"><h3>App visits — signed in vs signed out</h3></div>
+      <p class="sub">Whether someone was already signed in when they opened the app. Signed-out visits land on the sign-in screen.</p>
+      <div class="tiles" style="margin-bottom:0">
+        <div class="tile"><div class="k">Signed out</div><div class="v" id="tAppOut">—</div><div class="u" id="tAppOut7">saw the sign-in screen</div></div>
+        <div class="tile"><div class="k">Signed in</div><div class="v" id="tAppIn">—</div><div class="u" id="tAppIn7">returning users, not you</div></div>
+        <div class="tile"><div class="k">You</div><div class="v" id="tAppMe">—</div><div class="u" id="tAppMe7">your own signed-in visits</div></div>
+      </div>
+      <p class="note">All time. Signing in with an email link opens a new tab, which counts as one signed-out visit, so each new signup adds one here too. Your own visits while signed out can't be told apart from anyone else's.</p>
+    </div>
     <p class="note" id="loadErr"></p>
   </div>
 </div>
@@ -205,7 +215,7 @@
   sb.auth.getSession().then(function (r) { handle(r.data && r.data.session); });
   sb.auth.onAuthStateChange(function (ev, session) { if (ev === "SIGNED_IN") handle(session); });
 
-  var loaded = false;
+  var loaded = false, myUid = null;
   function handle(session) {
     if (!session || !session.user) return;
     var email = String(session.user.email || "").toLowerCase();
@@ -220,6 +230,7 @@
     $("dash").classList.remove("hidden");
     $("signOut").classList.remove("hidden");
     $("who").textContent = "Signed in as " + email;
+    myUid = session.user.id;
     loadStats();
   }
 
@@ -263,6 +274,18 @@
     sb.from("visits").select("t,path").gte("t", d30).limit(20000).then(function (r) {
       if (r.error) return fail(r.error);
       drawChart(r.data || []);
+    });
+    sb.from("visits").select("t,uid").eq("path", "/app").limit(50000).then(function (r) {
+      if (r.error) return fail(r.error);
+      var c = { out: 0, inn: 0, me: 0 }, c7 = { out: 0, inn: 0, me: 0 };
+      (r.data || []).forEach(function (row) {
+        var kind = !row.uid ? "out" : (row.uid === myUid ? "me" : "inn");
+        c[kind]++;
+        if (new Date(row.t) >= new Date(d7)) c7[kind]++;
+      });
+      $("tAppOut").textContent = fmt(c.out); $("tAppOut7").textContent = "+" + fmt(c7.out) + " in the last 7 days";
+      $("tAppIn").textContent = fmt(c.inn); $("tAppIn7").textContent = "+" + fmt(c7.inn) + " in the last 7 days";
+      $("tAppMe").textContent = fmt(c.me); $("tAppMe7").textContent = "+" + fmt(c7.me) + " in the last 7 days";
     });
   }
 
