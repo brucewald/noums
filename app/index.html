@@ -2145,7 +2145,7 @@
     $("setCloudLabel").textContent = S.cloudCheck !== false ? "On" : "Off";
     if (ACCOUNT) {
       $("accEmail").textContent = ACCOUNT.email;
-      $("accPlan").textContent = ACCOUNT.founder ? "Pro — founder · admin, free forever" : (ACCOUNT.plan === "pro" ? "Pro (beta) — free for now" : "Free plan");
+      $("accPlan").textContent = ACCOUNT.founder ? "Founder account" : (ACCOUNT.plan === "pro" ? "Pro (beta) — free for now" : "Free plan");
     }
     $("setCamDefault").classList.toggle("on", !!S.camDefault);
     $("setCamLabel").textContent = S.camDefault ? "On by default" : "Off by default";
