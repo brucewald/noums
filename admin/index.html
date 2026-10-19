@@ -76,14 +76,14 @@
   </div>
 
   <div class="card" id="authCard">
-    <h1 style="margin-top:0">Founder sign-in</h1>
-    <p class="sub">This dashboard is restricted. Sign in with the founder account — anyone else sees nothing (enforced by the database, not just this page).</p>
+    <h1 style="margin-top:0">Restricted dashboard</h1>
+    <p class="sub">Authorized access only.</p>
     <div class="auth-row">
       <div class="g-btn-wrap" id="gBtn"></div>
       <button class="btn-accent" id="googleBtn">Continue with Google</button>
     </div>
     <div class="auth-row">
-      <input class="inp" id="emailInp" type="email" placeholder="bruce@waldschmidt.com" autocomplete="email">
+      <input class="inp" id="emailInp" type="email" placeholder="you@example.com" autocomplete="email">
       <button class="btn-ghost" id="magicBtn" style="padding:11px 20px">Email me a link</button>
     </div>
     <div class="err" id="authErr"></div>
@@ -220,7 +220,7 @@
     if (!session || !session.user) return;
     var email = String(session.user.email || "").toLowerCase();
     if (ADMINS.indexOf(email) === -1) {
-      showErr("Signed in as " + email + " — this account isn't the founder account, so there's nothing to see here.");
+      showErr("Signed in as " + email + " — this account doesn't have access.");
       $("signOut").classList.remove("hidden");
       return;
     }
