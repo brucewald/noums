@@ -101,6 +101,15 @@
       <div class="tile"><div class="k">Avg fillers / min</div><div class="v" id="tFpm">—</div><div class="u">across every session</div></div>
       <div class="tile"><div class="k">Revenue</div><div class="v" style="color:var(--muted-2)">$0</div><div class="u">payments not wired yet</div></div>
     </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="chart-head"><h3>Visits today</h3></div>
+      <p class="sub">Page loads since midnight, your time.</p>
+      <div class="tiles" style="margin-bottom:0">
+        <div class="tile"><div class="k">Total</div><div class="v" id="tToday">—</div><div class="u">landing + app</div></div>
+        <div class="tile"><div class="k">Landing</div><div class="v" id="tTodayLand">—</div><div class="u">noums.net home page</div></div>
+        <div class="tile"><div class="k">App</div><div class="v" id="tTodayApp">—</div><div class="u" id="tTodayAppU">opened the app</div></div>
+      </div>
+    </div>
     <div class="card">
       <div class="chart-head">
         <h3>Visits per day — last 30 days</h3>
@@ -286,6 +295,18 @@
       $("tAppOut").textContent = fmt(c.out); $("tAppOut7").textContent = "+" + fmt(c7.out) + " in the last 7 days";
       $("tAppIn").textContent = fmt(c.inn); $("tAppIn7").textContent = "+" + fmt(c7.inn) + " in the last 7 days";
       $("tAppMe").textContent = fmt(c.me); $("tAppMe7").textContent = "+" + fmt(c7.me) + " in the last 7 days";
+    });
+    var midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    sb.from("visits").select("path,uid").gte("t", midnight.toISOString()).limit(20000).then(function (r) {
+      if (r.error) return fail(r.error);
+      var land = 0, app = 0, me = 0;
+      (r.data || []).forEach(function (row) {
+        if (String(row.path).indexOf("app") > -1) { app++; if (row.uid === myUid) me++; } else land++;
+      });
+      $("tToday").textContent = fmt(land + app);
+      $("tTodayLand").textContent = fmt(land);
+      $("tTodayApp").textContent = fmt(app);
+      if (me) $("tTodayAppU").textContent = "opened the app, " + fmt(me) + " of them you";
     });
   }
 
