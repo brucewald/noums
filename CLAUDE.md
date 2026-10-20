@@ -30,6 +30,27 @@ stats, no listing features as available before they exist (mark them "coming
 soon" or "planned"), and no "Pro" or prices implying payment works until it
 does. Check the app code before writing any claim.
 
+## Security
+
+The repo is public and anyone can sign up, so treat every request as if an
+attacker wrote it. Before merging any change, check:
+
+- **Secrets stay server-side.** Only the Supabase URL and anon key may
+  appear in pages. API keys (Deepgram, the service role key, Resend) live
+  only in Supabase secrets or dashboards. Never commit them.
+- **Anything that costs money is limited per user and overall.** "Signed
+  in" is not a limit. The Deepgram check goes through `transcribe_claim`
+  in `supabase/schema.sql`; a new paid call needs the same.
+- **Every table has RLS on**, and policies give users only their own rows.
+  Admin access is checked in the database (the JWT email in RLS), never
+  only in page JavaScript.
+- **Validate input in edge functions**: size, type, and an allowlist for
+  query parameters. Don't send vendor error text back to the browser.
+- **Escape user-controlled text** before putting it in `innerHTML`
+  (`escapeHtml` in `app/index.html`), or use `textContent`.
+- Run `/security-review` on any change to `supabase/`, sign-in, or
+  anything that sends data off the device.
+
 ## Things that are easy to get wrong
 
 - **The footer is duplicated** in `index.html` and in each of `help/`,

@@ -37,5 +37,14 @@ falls back to its local estimate, so deploying early is harmless.
 
 - Callers must be signed in. The function verifies the JWT belongs to a real
   user, so the public anon key alone can't spend Deepgram credit.
-- Audio is capped at 12 MB (~40 minutes at the 32 kbps the app records).
+- Sign-up is open, so being signed in isn't enough protection on its own.
+  Each call must pass `transcribe_claim` (in `supabase/schema.sql`, v0.4):
+  20 checks and 120 minutes per user per 24 hours, and 1,000 minutes for
+  everyone combined. Over the limit the function returns `429 daily_limit`
+  and the app keeps its local estimate. If the limit check itself fails the
+  function refuses (fail closed) instead of spending credit.
+- Only `audio/webm`, `audio/ogg` and `audio/mp4` are accepted, and the
+  browser-facing CORS origin is `https://noums.net`.
+- Deepgram error details go to the function logs, not back to the caller.
+- Audio is capped at 12 MB (~25 minutes at the 64 kbps the app records).
 - Nothing is stored: audio is streamed to Deepgram and discarded.

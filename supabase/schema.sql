@@ -140,3 +140,65 @@ stable
 as $$ select now() $$;
 
 grant execute on function public.keepalive() to anon;
+
+-- ============================================================
+-- v0.4 additions — daily limit on the Deepgram check
+-- ============================================================
+
+-- Any signed-in account could call the transcribe function as often as it
+-- liked, and sign-up is open, so one person could spend all the Deepgram
+-- credit. The function now asks transcribe_claim() before each call and
+-- reports the real audio length with transcribe_done() afterwards.
+-- Only the edge function (service role) may touch any of this.
+create table public.transcribe_usage (
+  id bigint generated always as identity primary key,
+  uid uuid not null references auth.users(id) on delete cascade,
+  t timestamptz not null default now(),
+  secs numeric not null default 0
+);
+alter table public.transcribe_usage enable row level security;
+-- no policies: signed-in users and anon can't read or write it
+create index transcribe_usage_t on public.transcribe_usage (t);
+create index transcribe_usage_uid_t on public.transcribe_usage (uid, t);
+
+-- Returns a row id if this user may run one more check, or null if a limit
+-- is reached. Limits are per rolling 24 hours. Change the numbers here.
+create or replace function public.transcribe_claim(p_uid uuid)
+returns bigint
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  max_checks_per_user int := 20;    -- checks per person per day
+  max_mins_per_user   int := 120;   -- minutes of audio per person per day
+  max_mins_everyone   int := 1000;  -- minutes for all users combined per day
+  n int; mins numeric; all_mins numeric; new_id bigint;
+begin
+  -- one claim at a time, so parallel requests can't all slip under the limit
+  perform pg_advisory_xact_lock(hashtext('transcribe_claim'));
+  select count(*), coalesce(sum(secs), 0) / 60 into n, mins
+    from transcribe_usage where uid = p_uid and t > now() - interval '24 hours';
+  select coalesce(sum(secs), 0) / 60 into all_mins
+    from transcribe_usage where t > now() - interval '24 hours';
+  if n >= max_checks_per_user or mins >= max_mins_per_user or all_mins >= max_mins_everyone then
+    return null;
+  end if;
+  insert into transcribe_usage (uid) values (p_uid) returning id into new_id;
+  return new_id;
+end;
+$$;
+
+create or replace function public.transcribe_done(p_id bigint, p_secs numeric)
+returns void
+language sql
+security definer set search_path = public
+as $$ update transcribe_usage set secs = greatest(p_secs, 0) where id = p_id $$;
+
+revoke all on function public.transcribe_claim(uuid) from public, anon, authenticated;
+revoke all on function public.transcribe_done(bigint, numeric) from public, anon, authenticated;
+grant execute on function public.transcribe_claim(uuid) to service_role;
+grant execute on function public.transcribe_done(bigint, numeric) to service_role;
+grant select, insert, update on public.transcribe_usage to service_role;
+
+-- Old rows aren't needed after a day; keep the table small.
+-- (Optional) run now and then:  delete from public.transcribe_usage where t < now() - interval '7 days';

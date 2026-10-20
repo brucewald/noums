@@ -171,6 +171,9 @@ It deploys separately from GitHub Pages: a change to
 `supabase functions deploy transcribe`). It sends `mip_opt_out=true` so
 Deepgram doesn't keep audio for model training; the privacy policy depends
 on that, so don't drop it.
+It also needs the v0.4 block of `schema.sql` (the `transcribe_claim` daily
+limit). Run that SQL before redeploying the function, or every check fails
+with 503 `limit_check_failed`.
 Until it is, the function returns 503 and the app silently falls back to
 its on-device estimate — so this failure is invisible; check it directly.
 
